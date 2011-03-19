@@ -8,13 +8,15 @@ The sample project uses a require-jquery.js file which is a combination of three
 
 * RequireJS, version 0.24.0
 * jQuery, version 1.5.1
-* [post.js](blob/master/parts/post.js), which just registers jQuery as a module.
+* [post.js](require-jquery/blob/master/parts/post.js), which just registers jQuery as a module.
 
 This project will be kept relatively up to date with the latest jQuery and RequireJS files as they are released.
 
 ## Alternate Integration
 
-If you do not want to bundle RequireJS with jQuery, you can load jQuery separately, not as part of the same file as RequireJS, but it has some implications when using the [RequireJS optimizer](http://requirejs.org/docs/optimization.html). See **Optimization Considerations** below. First, an explanation on what to change in the sample project:
+If you do not want to bundle RequireJS with jQuery, you can load jQuery separately, not as part of the same file as RequireJS, but it has some implications when using the [RequireJS optimizer](http://requirejs.org/docs/optimization.html). See **Optimization Considerations** below.
+
+First, an explanation on what to change in the sample project:
 
 ### app.html
 

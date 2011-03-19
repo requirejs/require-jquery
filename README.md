@@ -1,6 +1,6 @@
 # RequireJS + jQuery
 
-This project shows how jQuery can be used with RequireJS. It includes a sample project that you can use as a template to get started.
+This project shows how [jQuery](http://jquery.com) can be used with [RequireJS](http://requirejs.org). It includes a sample project that you can use as a template to get started.
 
 See the [Use with jQuery](http://requirejs.org/docs/jquery.html) page on the RequireJS site for more background on the sample project.
 
@@ -8,13 +8,13 @@ The sample project uses a require-jquery.js file which is a combination of three
 
 * RequireJS, version 0.24.0
 * jQuery, version 1.5.1
-* [post.js](tree/master/parts/post.js), which just registers jQuery as a module.
+* [post.js](blob/master/parts/post.js), which just registers jQuery as a module.
 
 This project will be kept relatively up to date with the latest jQuery and RequireJS files as they are released.
 
 ## Alternate Integration
 
-If you do not want to bundle RequireJS with jQuery, you can load jQuery separately, not as part of the same file as RequireJS, but it has some implications when using the RequireJS optimizer. See **Optimization Considerations** below. First, an explanation on what to change in the sample project:
+If you do not want to bundle RequireJS with jQuery, you can load jQuery separately, not as part of the same file as RequireJS, but it has some implications when using the [RequireJS optimizer](http://requirejs.org/docs/optimization.html). See **Optimization Considerations** below. First, an explanation on what to change in the sample project:
 
 ### app.html
 
@@ -110,4 +110,26 @@ For the optimizer: create an empty file called **blank.js** and put it in the we
 
 By wrapping each of the jQuery plugins that implicitly rely on jQuery in a define() call, you can be sure they will not execute until jQuery is loaded via the priority configuration.
 
-**NOTE**: some jQuery plugin files may try to declare global variables. Most well-written plugins try to avoid creating global variables, but if the plugin does do try, wrapping the code in a define() call may cause errors if the plugin expects you to call one of the global variables it creates.
+**NOTE**: If a plugin tries to define a global variable (does not attach the functionality to jQuery.fn), wrapping the code in a define() call may cause errors if the plugin expects you to call one of the global variables it creates.
+
+You can work around this problem by declaring the variable outside the define call. So, for example, if the plugin looks like this when it is wrapped:
+
+    define(['jquery'], function (jQuery) {
+        var $ = jQuery;
+
+        //The plugin wanted to make globalFoo a global,
+        //but this will not work with the define wrapping:
+        var globalFoo = "something";
+        ...
+    });
+
+Put the var declaration outside the define function and remove the "var" from the internal assignment:
+
+    var globalFoo;
+    define(['jquery'], function (jQuery) {
+        var $ = jQuery;
+
+        //Just assign now, remove the declaration.
+        globalFoo = "something";
+        ...
+    });

@@ -2,7 +2,7 @@
 
 This project shows how [jQuery](http://jquery.com) can be used with [RequireJS](http://requirejs.org). It includes a sample project that you can use as a template to get started.
 
-See the [Use with jQuery](http://requirejs.org/docs/jquery.html) page on the RequireJS site for more background on the sample project.
+See the [Use with jQuery](http://requirejs.org/docs/jquery.html) page on the RequireJS site for more background on the sample project. The RequireJS site also has a link to [download this sample project](http://requirejs.org/docs/download.html#samplejquery).
 
 The sample project uses a require-jquery.js file which is a combination of three files:
 

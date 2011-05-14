@@ -5,3 +5,4 @@
 * Copy the appropriate version of jQuery and save it in this directory as
 "jquery.js".
 * Run update.sh.
+

@@ -20,39 +20,64 @@ First, an explanation on what to change in the sample project:
 
 ### app.html
 
-Change the script tag to load just **require.js** ([download it](http://requirejs.org/docs/download.html#requirejs) from the RequireJS site) instead of require-jquery.js.
+* Change the script tag to load just **require.js** ([download it](http://requirejs.org/docs/download.html#requirejs) from the RequireJS site) instead of require-jquery.js
+* Remove the data-main attribute
+* Load the main.js file with a require() call in the HTML file.
+* Specify a [priority configuration option](http://requirejs.org/docs/api.html#config). This tells RequireJS to download jQuery before tracing any other script dependencies:
 
-### main.js
+    <!DOCTYPE html>
+    <html>
+        <head>
+            <title>jQuery+RequireJS Sample Page</title>
+            <script src="scripts/require.js"></script>
+            <script>
+            require({
+                baseUrl: 'scripts',
+                priority: ['jquery']
+            }, ['main']);
+            </script>
+        </head>
+        <body>
+            <h1>jQuery+RequireJS Sample Page</h1>
+            <p>Look at source or inspect the DOM to see how it works.</p>
+        </body>
+    </html>
 
-Change main.js to use the [priority configuration option](http://requirejs.org/docs/api.html#config). This tells RequireJS to download jQuery before tracing any other script dependencies:
+The above example assumes that you downloaded jQuery and placed it in the project
+as **webapp/scripts/jquery.js**. If you wanted to load jQuery from a CDN, like Google's you
+could do this:
 
-    //Configure RequireJS
-    require({
-        //Load jQuery before any other scripts, since jQuery plugins normally
-        //assume jQuery is already loaded in the page.
-        priority: ['jquery']
-    });
+    <!DOCTYPE html>
+    <html>
+        <head>
+            <title>jQuery+RequireJS Sample Page</title>
+            <script src="scripts/require.js"></script>
+            <script>
+            require({
+                baseUrl: 'scripts',
+                paths: {
+                    jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/1.6.0/jquery.min'
+                },
+                priority: ['jquery']
+            }, ['main']);
+            </script>
+        </head>
+        <body>
+            <h1>jQuery+RequireJS Sample Page</h1>
+            <p>Look at source or inspect the DOM to see how it works.</p>
+        </body>
+    </html>
 
-    //Load scripts.
-    require(['jquery', 'jquery.alpha', 'jquery.beta'], function($) {
-        //the jquery.alpha.js and jquery.beta.js plugins have been loaded.
-        $(function() {
-            $('body').alpha().beta();
-        });
-    });
-
+However, you will want to download a local copy of jQuery and place it in the
+project at **webapp/scripts/jquery.js** so it can be used with the optimizer.
 
 ### Optimization Considerations
 
-Since jQuery plugins do not explicitly specify jQuery as a script dependency via the RequireJS define() call, and they expect jQuery to already be in the page, there can be a problem when you try to use the RequireJS optimizer with the setup above.
+With jQuery loaded externally, before main.js is loaded, jQuery now needs to be
+excluded from the built file the optimizer generates.
 
-If you exclude jQuery from the optimized main.js file, then the plugins will be included in main.js, but they will try to use jQuery before the priority configuration has had a chance to load jQuery.
-
-There are two options to fix this:
-
-#### 1) Include jQuery in the optimized file.
-
-* Download the version of jQuery you are using, and put it in the **webapp/scripts** directory, and call it **jquery.js**. Then change the app.build.js file to the following:
+Make sure you have a jquery.js in the **webapp/scripts** directory. Then change
+the app.build.js file to the following:
 
     ({
         appDir: "../",
@@ -64,74 +89,10 @@ There are two options to fix this:
 
         modules: [
             {
-                name: "main"
+                name: "main",
+                exclude: ["jquery"]
             }
         ]
     })
 
-#### 2) wrap the jQuery plugins in a define call.
-
-Instead of including jQuery in the optimized main.js, you can modify the contents of each file that implicitly depends on jQuery with the following (assuming it does not already have a define() call in the file):
-
-    define(['jquery'], function (jQuery) {
-        //Some plugins use jQuery, some may just use $,
-        //so create an alias for $ just in case. You can
-        //leave this out if the plugin clearly uses "jQuery"
-        //instead of "$".
-        var $ = jQuery;
-
-        //The rest of the file contents go here.
-
-    });
-
-For the optimizer: create an empty file called **blank.js** and put it in the webapp/scripts directory. Then change app.build.js to the following:
-
-    ({
-        appDir: "../",
-        baseUrl: "scripts",
-        dir: "../../webapp-build",
-        //Comment out the optimize line if you want
-        //the code minified by UglifyJS
-        optimize: "none",
-
-        paths: {
-            "jquery": "blank"
-        },
-
-        modules: [
-            {
-                //If you have multiple pages in your app, you may
-                //want jQuery cached separately from the optimized
-                //main module. In that case, uncomment the exclude
-                //directive below.
-                exclude: ["jquery"],
-                name: "main"
-            }
-        ]
-    })
-
-By wrapping each of the jQuery plugins that implicitly rely on jQuery in a define() call, you can be sure they will not execute until jQuery is loaded via the priority configuration.
-
-**NOTE**: If a plugin tries to define a global variable (does not attach the functionality to jQuery.fn), wrapping the code in a define() call may cause errors if the plugin expects you to call one of the global variables it creates.
-
-You can work around this problem by declaring the variable outside the define call. So, for example, if the plugin looks like this when it is wrapped:
-
-    define(['jquery'], function (jQuery) {
-        var $ = jQuery;
-
-        //The plugin wanted to make globalFoo a global,
-        //but this will not work with the define wrapping:
-        var globalFoo = "something";
-        ...
-    });
-
-Put the var declaration outside the define function and remove the "var" from the internal assignment:
-
-    var globalFoo;
-    define(['jquery'], function (jQuery) {
-        var $ = jQuery;
-
-        //Just assign now, remove the declaration.
-        globalFoo = "something";
-        ...
-    });
+This will bundle all the scripts into the built main.js file, except for jQuery.

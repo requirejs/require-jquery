@@ -25,48 +25,35 @@ First, an explanation on what to change in the sample project:
 * Load the main.js file with a require() call in the HTML file.
 * Specify a [priority configuration option](http://requirejs.org/docs/api.html#config). This tells RequireJS to download jQuery before tracing any other script dependencies:
 
-    &lt;!DOCTYPE html&gt;
-    &lt;html&gt;
-        &lt;head&gt;
-            &lt;title&gt;jQuery+RequireJS Sample Page&lt;/title&gt;
-            &lt;script src="scripts/require.js"&gt;&lt;/script&gt;
-            &lt;script&gt;
-            require({
-                baseUrl: 'scripts',
-                priority: ['jquery']
-            }, ['main']);
-            &lt;/script&gt;
-        &lt;/head&gt;
-        &lt;body&gt;
-            &lt;h1&gt;jQuery+RequireJS Sample Page&lt;/h1&gt;
-            &lt;p&gt;Look at source or inspect the DOM to see how it works.&lt;/p&gt;
-        &lt;/body&gt;
-    &lt;/html&gt;
+```html
+
+    <title>jQuery+RequireJS Sample Page</title>
+    <script src="scripts/require.js"></script>
+    <script>
+    require({
+        baseUrl: 'scripts',
+        priority: ['jquery']
+    }, ['main']);
+    </script>
+```
 
 The above example assumes that you downloaded jQuery and placed it in the project
 as **webapp/scripts/jquery.js**. If you wanted to load jQuery from a CDN, like Google's you
 could do this:
 
-    &lt;!DOCTYPE html&gt;
-    &lt;html&gt;
-        &lt;head&gt;
-            &lt;title&gt;jQuery+RequireJS Sample Page&lt;/title&gt;
-            &lt;script src="scripts/require.js"&gt;&lt;/script&gt;
-            &lt;script&gt;
-            require({
-                baseUrl: 'scripts',
-                paths: {
-                    jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/1.6.0/jquery.min'
-                },
-                priority: ['jquery']
-            }, ['main']);
-            &lt;/script&gt;
-        &lt;/head&gt;
-        &lt;body&gt;
-            &lt;h1&gt;jQuery+RequireJS Sample Page&lt;/h1&gt;
-            &lt;p&gt;Look at source or inspect the DOM to see how it works.&lt;/p&gt;
-        &lt;/body&gt;
-    &lt;/html&gt;
+```html
+    <title>jQuery+RequireJS Sample Page</title>
+    <script src="scripts/require.js"></script>
+    <script>
+    require({
+        baseUrl: 'scripts',
+        paths: {
+            jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/1.6.0/jquery.min'
+        },
+        priority: ['jquery']
+    }, ['main']);
+    </script>
+```
 
 However, you will want to download a local copy of jQuery and place it in the
 project at **webapp/scripts/jquery.js** so it can be used with the optimizer.
@@ -83,6 +70,7 @@ dependency.
 
 Then change the app.build.js file to the following:
 
+```javascript
     ({
         appDir: "../",
         baseUrl: "scripts",
@@ -98,5 +86,6 @@ Then change the app.build.js file to the following:
             }
         ]
     })
+```
 
 This will bundle all the scripts into the built main.js file, except for jQuery.

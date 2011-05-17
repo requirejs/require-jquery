@@ -25,34 +25,34 @@ First, an explanation on what to change in the sample project:
 * Load the main.js file with a require() call in the HTML file.
 * Specify a [priority configuration option](http://requirejs.org/docs/api.html#config). This tells RequireJS to download jQuery before tracing any other script dependencies:
 
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <title>jQuery+RequireJS Sample Page</title>
-            <script src="scripts/require.js"></script>
-            <script>
+    &lt;!DOCTYPE html&gt;
+    &lt;html&gt;
+        &lt;head&gt;
+            &lt;title&gt;jQuery+RequireJS Sample Page&lt;/title&gt;
+            &lt;script src="scripts/require.js"&gt;&lt;/script&gt;
+            &lt;script&gt;
             require({
                 baseUrl: 'scripts',
                 priority: ['jquery']
             }, ['main']);
-            </script>
-        </head>
-        <body>
-            <h1>jQuery+RequireJS Sample Page</h1>
-            <p>Look at source or inspect the DOM to see how it works.</p>
-        </body>
-    </html>
+            &lt;/script&gt;
+        &lt;/head&gt;
+        &lt;body&gt;
+            &lt;h1&gt;jQuery+RequireJS Sample Page&lt;/h1&gt;
+            &lt;p&gt;Look at source or inspect the DOM to see how it works.&lt;/p&gt;
+        &lt;/body&gt;
+    &lt;/html&gt;
 
 The above example assumes that you downloaded jQuery and placed it in the project
 as **webapp/scripts/jquery.js**. If you wanted to load jQuery from a CDN, like Google's you
 could do this:
 
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <title>jQuery+RequireJS Sample Page</title>
-            <script src="scripts/require.js"></script>
-            <script>
+    &lt;!DOCTYPE html&gt;
+    &lt;html&gt;
+        &lt;head&gt;
+            &lt;title&gt;jQuery+RequireJS Sample Page&lt;/title&gt;
+            &lt;script src="scripts/require.js"&gt;&lt;/script&gt;
+            &lt;script&gt;
             require({
                 baseUrl: 'scripts',
                 paths: {
@@ -60,13 +60,13 @@ could do this:
                 },
                 priority: ['jquery']
             }, ['main']);
-            </script>
-        </head>
-        <body>
-            <h1>jQuery+RequireJS Sample Page</h1>
-            <p>Look at source or inspect the DOM to see how it works.</p>
-        </body>
-    </html>
+            &lt;/script&gt;
+        &lt;/head&gt;
+        &lt;body&gt;
+            &lt;h1&gt;jQuery+RequireJS Sample Page&lt;/h1&gt;
+            &lt;p&gt;Look at source or inspect the DOM to see how it works.&lt;/p&gt;
+        &lt;/body&gt;
+    &lt;/html&gt;
 
 However, you will want to download a local copy of jQuery and place it in the
 project at **webapp/scripts/jquery.js** so it can be used with the optimizer.
@@ -76,8 +76,12 @@ project at **webapp/scripts/jquery.js** so it can be used with the optimizer.
 With jQuery loaded externally, before main.js is loaded, jQuery now needs to be
 excluded from the built file the optimizer generates.
 
-Make sure you have a jquery.js in the **webapp/scripts** directory. Then change
-the app.build.js file to the following:
+**First**, make sure you have a jquery.js file in the the **webapp/scripts**
+directory. It can be a blank file, but should exist. The optimizer cannot
+fetch files from the network, so it needs a local file to satisfy the "jquery"
+dependency.
+
+Then change the app.build.js file to the following:
 
     ({
         appDir: "../",

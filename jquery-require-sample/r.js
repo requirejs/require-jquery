@@ -1,24 +1,26 @@
 /**
- * @license r.js 0.30.0 Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
+ * @license r.js 0.24.0+ Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
 
 /*
  * This is a bootstrap script to allow running RequireJS in the command line
- * in either a Java/Rhino or Node environment. It is best to call this script
- * via the x script that is a sibling to it.
+ * in either a Java/Rhino or Node environment. It is modified by the top-level
+ * dist.js file to inject other files to completely enable this file. It is
+ * the shell of the r.js file.
  */
 
 /*jslint strict: false, evil: true */
-/*global readFile: true, process: false, Packages: false, require: true
-  print: false, console: false, java: false */
+/*global readFile: true, process: false, Packages: false, print: false,
+console: false, java: false */
 
-var require, define;
+var requirejs, require, define;
 (function (console, args, readFileFunc) {
 
-    var fileName, env, fs, vm, path, exec, rhinoContext, dir, nodeRequire, exists,
-        version = '0.30.0',
+    var fileName, env, fs, vm, path, exec, rhinoContext, dir, nodeRequire,
+        nodeDefine, exists,
+        version = '0.24.0+',
         jsSuffixRegExp = /\.js$/,
         //Indicates so build/build.js that the modules for the optimizer
         //are built-in.
@@ -71,14 +73,20 @@ var require, define;
         vm = require('vm');
         path = require('path');
         nodeRequire = require;
+        nodeDefine = define;
+
+        //Temporarily hide require and define to allow require.js to define
+        //them.
         require = undefined;
+        define = undefined;
 
         readFile = function (path) {
             return fs.readFileSync(path, 'utf8');
         };
 
         exec = function (string, name) {
-            return vm.runInThisContext(string, name);
+            return vm.runInThisContext(this.requirejsVars.require.makeNodeWrapper(string),
+                                       name ? fs.realpathSync(name) : '');
         };
 
         exists = function (fileName) {
@@ -133,10 +141,11 @@ var require, define;
         globalDefQueue = [],
         interactiveScript = null,
         isDone = false,
+        checkLoadedDepth = 0,
         useInteractive = false,
         req, cfg = {}, currentlyAddingScript, s, head, baseElement, scripts, script,
         src, subPath, mainScript, dataMain, i, scrollIntervalId, setReadyState, ctx,
-        jQueryCheck;
+        jQueryCheck, checkLoadedTimeoutId;
 
     function isFunction(it) {
         return ostring.call(it) === "[object Function]";
@@ -160,6 +169,22 @@ var require, define;
             }
         }
         return req;
+    }
+
+    /**
+     * Constructs an error with a pointer to an URL with more information.
+     * @param {String} id the error ID that maps to an ID on a web page.
+     * @param {String} message human readable error.
+     * @param {Error} [err] the original error, if there is one.
+     *
+     * @returns {Error}
+     */
+    function makeError(id, msg, err) {
+        var e = new Error(msg + '\nhttp://requirejs.org/docs/errors.html#' + id);
+        if (err) {
+            e.originalError = err;
+        }
+        return e;
     }
 
     /**
@@ -187,28 +212,54 @@ var require, define;
             pkgs[pkgObj.name] = {
                 name: pkgObj.name,
                 location: location || pkgObj.name,
-                lib: pkgObj.lib || "lib",
                 //Remove leading dot in main, so main paths are normalized,
                 //and remove any trailing .js, since different package
                 //envs have different conventions: some use a module name,
                 //some use a file name.
-                main: (pkgObj.main || "lib/main")
+                main: (pkgObj.main || "main")
                       .replace(currDirRegExp, '')
                       .replace(jsSuffixRegExp, '')
             };
         }
     }
 
-    //Check for an existing version of require. If so, then exit out. Only allow
-    //one version of require to be active in a page. However, allow for a require
-    //config object, just exit quickly if require is an actual function.
-    if (typeof require !== "undefined") {
-        if (isFunction(require)) {
+    /**
+     * jQuery 1.4.3-1.5.x use a readyWait/ready() pairing to hold DOM
+     * ready callbacks, but jQuery 1.6 supports a holdReady() API instead.
+     * At some point remove the readyWait/ready() support and just stick
+     * with using holdReady.
+     */
+    function jQueryHoldReady($, shouldHold) {
+        if ($.holdReady) {
+            $.holdReady(shouldHold);
+        } else if (shouldHold) {
+            $.readyWait += 1;
+        } else {
+            $.ready(true);
+        }
+    }
+
+    if (typeof define !== "undefined") {
+        //If a define is already in play via another AMD loader,
+        //do not overwrite.
+        return;
+    }
+
+    if (typeof requirejs !== "undefined") {
+        if (isFunction(requirejs)) {
+            //Do not overwrite and existing requirejs instance.
             return;
         } else {
-            //assume it is a config object.
-            cfg = require;
+            cfg = requirejs;
+            requirejs = undefined;
         }
+    }
+
+    //Allow for a require config object
+    if (typeof require !== "undefined" && !isFunction(require)) {
+        //assume it is a config object.
+        cfg = require;
+        require = undefined;
     }
 
     /**
@@ -384,9 +435,9 @@ var require, define;
                     if (req.toModuleUrl) {
                         //Special logic required for a particular engine,
                         //like Node.
-                        url = req.toModuleUrl(context, name, parentModuleMap);
+                        url = req.toModuleUrl(context, normalizedName, parentModuleMap);
                     } else {
-                        url = context.nameToUrl(name, null, parentModuleMap);
+                        url = context.nameToUrl(normalizedName, null, parentModuleMap);
                     }
 
                     //Store the URL mapping for later.
@@ -463,7 +514,8 @@ var require, define;
             mixin(modRequire, {
                 nameToUrl: makeContextModuleFunc(context.nameToUrl, relModuleMap),
                 toUrl: makeContextModuleFunc(context.toUrl, relModuleMap),
-                isDefined: makeContextModuleFunc(context.isDefined, relModuleMap),
+                defined: makeContextModuleFunc(context.requireDefined, relModuleMap),
+                specified: makeContextModuleFunc(context.requireSpecified, relModuleMap),
                 ready: req.ready,
                 isBrowser: req.isBrowser
             });
@@ -578,7 +630,7 @@ var require, define;
         }
 
         function execManager(manager) {
-            var i, ret, waitingCallbacks,
+            var i, ret, waitingCallbacks, err,
                 cb = manager.callback,
                 fullName = manager.fullName,
                 args = [],
@@ -594,24 +646,20 @@ var require, define;
                     }
                 }
 
-                ret = req.execCb(fullName, manager.callback, args, defined[fullName]);
+                try {
+                    ret = req.execCb(fullName, manager.callback, args, defined[fullName]);
+                } catch (e) {
+                    err = e;
+                }
 
                 if (fullName) {
-                    //If exports is in play, favor that since it helps circular
-                    //dependencies. If setting exports via "module" is in play,
-                    //favor that but only if the value is different from default
-                    //exports value.
-                    if (manager.usingExports && manager.cjsModule &&
-                        manager.cjsModule.exports !== defined[fullName]) {
+                    //If setting exports via "module" is in play,
+                    //favor that over return value and exports. After that,
+                    //favor a non-undefined return value over exports use.
+                    if (manager.cjsModule && manager.cjsModule.exports !== undefined) {
                         ret = defined[fullName] = manager.cjsModule.exports;
-                    } else if (fullName in defined) {
-                        //This case is when usingExports is in play and
-                        //module.exports/setExports was not used. It could also
-                        //occur if the module was previously defined, but that
-                        //should not happen, checks for specified and defined
-                        //elsewhere should prevent that from happening. However,
-                        //if it does for some reason, only the original definition
-                        //will be used for integrity.
+                    } else if (ret === undefined && manager.usingExports) {
+                        //exports already set the defined value.
                         ret = defined[fullName];
                     } else {
                         //Use the return value from the function.
@@ -624,6 +672,31 @@ var require, define;
                 ret = defined[fullName] = cb;
             }
 
+            //Clean up waiting. Do this before error calls, and before
+            //calling back waitingCallbacks, so that bookkeeping is correct
+            //in the event of an error and error is reported in correct order,
+            //since the waitingCallbacks will likely have errors if the
+            //onError function does not throw.
+            if (waiting[manager.waitId]) {
+                delete waiting[manager.waitId];
+                manager.isDone = true;
+                context.waitCount -= 1;
+                if (context.waitCount === 0) {
+                    //Clear the wait array used for cycles.
+                    waitAry = [];
+                }
+            }
+
+            if (err) {
+                err = makeError('defineerror', 'Error evaluating ' +
+                                'module "' + fullName + '" at location "' +
+                                (fullName ? makeModuleMap(fullName).url : '') + '":\n' +
+                                err + '\nfileName:' + (err.fileName || err.sourceURL) +
+                                '\nlineNumber: ' + (err.lineNumber || err.line), err);
+                err.moduleName = fullName;
+                return req.onError(err);
+            }
+
             if (fullName) {
                 //If anything was waiting for this module to be defined,
                 //notify them now.
@@ -633,17 +706,6 @@ var require, define;
                         waitingCallbacks[i].onDep(fullName, ret);
                     }
                     delete managerCallbacks[fullName];
-                }
-            }
-
-            //Clean up waiting.
-            if (waiting[manager.waitId]) {
-                delete waiting[manager.waitId];
-                manager.isDone = true;
-                context.waitCount -= 1;
-                if (context.waitCount === 0) {
-                    //Clear the wait array used for cycles.
-                    waitAry = [];
                 }
             }
 
@@ -765,21 +827,21 @@ var require, define;
         }
 
         /**
-         * Convenience method to call main for a require.def call that was put on
+         * Convenience method to call main for a define call that was put on
          * hold in the defQueue.
          */
         function callDefMain(args) {
             main.apply(null, args);
             //Mark the module loaded. Must do it here in addition
-            //to doing it in require.def in case a script does
-            //not call require.def
+            //to doing it in define in case a script does
+            //not call define
             loaded[args[0]] = true;
         }
 
         /**
-         * As of jQuery 1.4.3, it supports a readyWait property that will hold off
+         * jQuery 1.4.3+ supports ways to hold off calling
          * calling jQuery ready callbacks until all scripts are loaded. Be sure
-         * to track it if readyWait is available. Also, since jQuery 1.4.3 does
+         * to track it if the capability exists.. Also, since jQuery 1.4.3 does
          * not register as a module, need to do some global inference checking.
          * Even if it does register as a module, not guaranteed to be the precise
          * name of the global. If a jQuery is tracked for this context, then go
@@ -796,7 +858,7 @@ var require, define;
                         return;
                     }
 
-                    if ("readyWait" in $) {
+                    if ("holdReady" in $ || "readyWait" in $) {
                         context.jQuery = $;
 
                         //Manually create a "jquery" module entry if not one already
@@ -807,9 +869,9 @@ var require, define;
                             return jQuery;
                         }]);
 
-                        //Increment jQuery readyWait if ncecessary.
+                        //Ask jQuery to hold DOM ready callbacks.
                         if (context.scriptCount) {
-                            $.readyWait += 1;
+                            jQueryHoldReady($, true);
                             context.jQueryIncremented = true;
                         }
                     }
@@ -903,15 +965,19 @@ var require, define;
             }
             if (expired && noLoads) {
                 //If wait time expired, throw error of unloaded modules.
-                err = new Error("require.js load timeout for modules: " + noLoads);
+                err = makeError("timeout", "Load timeout for modules: " + noLoads);
                 err.requireType = "timeout";
                 err.requireModules = noLoads;
                 return req.onError(err);
             }
             if (stillLoading || context.scriptCount) {
-                //Something is still waiting to load. Wait for it.
-                if (isBrowser || isWebWorker) {
-                    setTimeout(checkLoaded, 50);
+                //Something is still waiting to load. Wait for it, but only
+                //if a timeout is not already in effect.
+                if ((isBrowser || isWebWorker) && !checkLoadedTimeoutId) {
+                    checkLoadedTimeoutId = setTimeout(function () {
+                        checkLoadedTimeoutId = 0;
+                        checkLoaded();
+                    }, 50);
                 }
                 return undefined;
             }
@@ -930,9 +996,20 @@ var require, define;
                     forceExec(manager, {});
                 }
 
-                checkLoaded();
-                return undefined;
+                //Only allow this recursion to a certain depth. Only
+                //triggered by errors in calling a module in which its
+                //modules waiting on it cannot finish loading, or some circular
+                //dependencies that then may add more dependencies.
+                //The value of 5 is a bit arbitrary. Hopefully just one extra
+                //pass, or two for the case of circular dependencies generating
+                //more work that gets resolved in the sync node case.
+                if (checkLoadedDepth < 5) {
+                    checkLoadedDepth += 1;
+                    checkLoaded();
+                }
             }
+
+            checkLoadedDepth = 0;
 
             //Check for DOM ready, and nothing is waiting across contexts.
             req.checkReadyState();
@@ -961,8 +1038,8 @@ var require, define;
 
             load = function (ret) {
                 //Allow the build process to register plugin-loaded dependencies.
-                if (require.onPluginLoad) {
-                    require.onPluginLoad(context, pluginName, name, ret);
+                if (req.onPluginLoad) {
+                    req.onPluginLoad(context, pluginName, name, ret);
                 }
 
                 execManager({
@@ -991,7 +1068,9 @@ var require, define;
                 if (hasInteractive) {
                     useInteractive = false;
                 }
-                eval(text);
+
+                req.exec(text);
+
                 if (hasInteractive) {
                     useInteractive = true;
                 }
@@ -1014,7 +1093,8 @@ var require, define;
             }
 
             var pluginName = dep.prefix,
-                fullName = dep.fullName;
+                fullName = dep.fullName,
+                urlFetched = context.urlFetched;
 
             //Do not bother if the dependency has already been specified.
             if (specified[fullName] || loaded[fullName]) {
@@ -1055,7 +1135,10 @@ var require, define;
                     pluginsQueue[pluginName].push(dep);
                 }
             } else {
-                req.load(context, fullName, dep.url);
+                if (!urlFetched[dep.url]) {
+                    req.load(context, fullName, dep.url);
+                    urlFetched[dep.url] = true;
+                }
             }
         }
 
@@ -1079,7 +1162,7 @@ var require, define;
             while (defQueue.length) {
                 args = defQueue.shift();
                 if (args[0] === null) {
-                    return req.onError(new Error('Mismatched anonymous require.def modules'));
+                    return req.onError(makeError('mismatch', 'Mismatched anonymous define() module: ' + args[args.length - 1]));
                 } else {
                     callDefMain(args);
                 }
@@ -1234,12 +1317,16 @@ var require, define;
                 }
             },
 
-            isDefined: function (moduleName, relModuleMap) {
+            requireDefined: function (moduleName, relModuleMap) {
                 return makeModuleMap(moduleName, relModuleMap).fullName in defined;
             },
 
+            requireSpecified: function (moduleName, relModuleMap) {
+                return makeModuleMap(moduleName, relModuleMap).fullName in specified;
+            },
+
             require: function (deps, callback, relModuleMap) {
-                var moduleName, ret, moduleMap;
+                var moduleName, fullName, moduleMap;
                 if (typeof deps === "string") {
                     //Synchronous access to one module. If require.get is
                     //available (as in the Node adapter), prefer that.
@@ -1256,15 +1343,15 @@ var require, define;
 
                     //Normalize module name, if it contains . or ..
                     moduleMap = makeModuleMap(moduleName, relModuleMap);
+                    fullName = moduleMap.fullName;
 
-                    ret = defined[moduleMap.fullName];
-                    if (ret === undefined) {
-                        return req.onError(new Error("require: module name '" +
+                    if (!(fullName in defined)) {
+                        return req.onError(makeError("notloaded", "Module name '" +
                                     moduleMap.fullName +
                                     "' has not been loaded yet for context: " +
                                     contextName));
                     }
-                    return ret;
+                    return defined[fullName];
                 }
 
                 main(null, deps, callback, relModuleMap);
@@ -1317,11 +1404,11 @@ var require, define;
                         args[0] = moduleName;
                         break;
                     } else if (args[0] === moduleName) {
-                        //Found matching require.def call for this script!
+                        //Found matching define call for this script!
                         break;
                     } else {
-                        //Some other named require.def call, most likely the result
-                        //of a build layer that included many require.def calls.
+                        //Some other named define call, most likely the result
+                        //of a build layer that included many define calls.
                         callDefMain(args);
                         args = null;
                     }
@@ -1339,7 +1426,7 @@ var require, define;
                 }
 
                 //Mark the script as loaded. Note that this can be different from a
-                //moduleName that maps to a require.def call. This line is important
+                //moduleName that maps to a define call. This line is important
                 //for traditional browser scripts.
                 loaded[moduleName] = true;
 
@@ -1388,62 +1475,47 @@ var require, define;
                 var paths, pkgs, pkg, pkgPath, syms, i, parentModule, url,
                     config = context.config;
 
-                if (moduleName.indexOf("./") === 0 || moduleName.indexOf("../") === 0) {
-                    //A relative ID, just map it relative to relModuleMap's url
-                    syms = relModuleMap && relModuleMap.url ? relModuleMap.url.split('/') : [];
-                    //Pop off the file name.
-                    if (syms.length) {
-                        syms.pop();
-                    }
-                    syms = syms.concat(moduleName.split('/'));
-                    trimDots(syms);
-                    url = syms.join('/') +
-                          (ext ? ext :
-                          (req.jsExtRegExp.test(moduleName) ? "" : ".js"));
+                //Normalize module name if have a base relative module name to work from.
+                moduleName = normalize(moduleName, relModuleMap && relModuleMap.fullName);
+
+                //If a colon is in the URL, it indicates a protocol is used and it is just
+                //an URL to a file, or if it starts with a slash or ends with .js, it is just a plain file.
+                //The slash is important for protocol-less URLs as well as full paths.
+                if (req.jsExtRegExp.test(moduleName)) {
+                    //Just a plain path, not module name lookup, so just return it.
+                    //Add extension if it is included. This is a bit wonky, only non-.js things pass
+                    //an extension, this method probably needs to be reworked.
+                    url = moduleName + (ext ? ext : "");
                 } else {
+                    //A module that needs to be converted to a path.
+                    paths = config.paths;
+                    pkgs = config.pkgs;
 
-                    //Normalize module name if have a base relative module name to work from.
-                    moduleName = normalize(moduleName, relModuleMap);
-
-                    //If a colon is in the URL, it indicates a protocol is used and it is just
-                    //an URL to a file, or if it starts with a slash or ends with .js, it is just a plain file.
-                    //The slash is important for protocol-less URLs as well as full paths.
-                    if (req.jsExtRegExp.test(moduleName)) {
-                        //Just a plain path, not module name lookup, so just return it.
-                        //Add extension if it is included. This is a bit wonky, only non-.js things pass
-                        //an extension, this method probably needs to be reworked.
-                        url = moduleName + (ext ? ext : "");
-                    } else {
-                        //A module that needs to be converted to a path.
-                        paths = config.paths;
-                        pkgs = config.pkgs;
-
-                        syms = moduleName.split("/");
-                        //For each module name segment, see if there is a path
-                        //registered for it. Start with most specific name
-                        //and work up from it.
-                        for (i = syms.length; i > 0; i--) {
-                            parentModule = syms.slice(0, i).join("/");
-                            if (paths[parentModule]) {
-                                syms.splice(0, i, paths[parentModule]);
-                                break;
-                            } else if ((pkg = pkgs[parentModule])) {
-                                //If module name is just the package name, then looking
-                                //for the main module.
-                                if (moduleName === pkg.name) {
-                                    pkgPath = pkg.location + '/' + pkg.main;
-                                } else {
-                                    pkgPath = pkg.location + '/' + pkg.lib;
-                                }
-                                syms.splice(0, i, pkgPath);
-                                break;
+                    syms = moduleName.split("/");
+                    //For each module name segment, see if there is a path
+                    //registered for it. Start with most specific name
+                    //and work up from it.
+                    for (i = syms.length; i > 0; i--) {
+                        parentModule = syms.slice(0, i).join("/");
+                        if (paths[parentModule]) {
+                            syms.splice(0, i, paths[parentModule]);
+                            break;
+                        } else if ((pkg = pkgs[parentModule])) {
+                            //If module name is just the package name, then looking
+                            //for the main module.
+                            if (moduleName === pkg.name) {
+                                pkgPath = pkg.location + '/' + pkg.main;
+                            } else {
+                                pkgPath = pkg.location;
                             }
+                            syms.splice(0, i, pkgPath);
+                            break;
                         }
-
-                        //Join the path parts together, then figure out if baseUrl is needed.
-                        url = syms.join("/") + (ext || ".js");
-                        url = (url.charAt(0) === '/' || url.match(/^\w+:/) ? "" : config.baseUrl) + url;
                     }
+
+                    //Join the path parts together, then figure out if baseUrl is needed.
+                    url = syms.join("/") + (ext || ".js");
+                    url = (url.charAt(0) === '/' || url.match(/^\w+:/) ? "" : config.baseUrl) + url;
                 }
 
                 return config.urlArgs ? url +
@@ -1474,7 +1546,7 @@ var require, define;
      * on a require that are not standardized), and to give a short
      * name for minification/local scope use.
      */
-    req = require = function (deps, callback) {
+    req = requirejs = function (deps, callback) {
 
         //Find the right context, use default
         var contextName = defContextName,
@@ -1505,6 +1577,21 @@ var require, define;
         }
 
         return context.require(deps, callback);
+    };
+
+    /**
+     * Export require as a global, but only if it does not already exist.
+     */
+    if (typeof require === "undefined") {
+        require = req;
+    }
+
+    /**
+     * Global require.toUrl(), to match global require, mostly useful
+     * for debugging/work in the global space.
+     */
+    req.toUrl = function (moduleNamePlusExt) {
+        return contexts[defContextName].toUrl(moduleNamePlusExt);
     };
 
     req.version = version;
@@ -1552,9 +1639,8 @@ var require, define;
      * @param {Object} url the URL to the module.
      */
     req.load = function (context, moduleName, url) {
-        var contextName = context.contextName,
-            urlFetched = context.urlFetched,
-            loaded = context.loaded;
+        var loaded = context.loaded;
+
         isDone = false;
 
         //Only set loaded to false for tracking if it has not already been set.
@@ -1562,18 +1648,15 @@ var require, define;
             loaded[moduleName] = false;
         }
 
-        if (!urlFetched[url]) {
-            context.scriptCount += 1;
-            req.attach(url, contextName, moduleName);
-            urlFetched[url] = true;
+        context.scriptCount += 1;
+        req.attach(url, context, moduleName);
 
-            //If tracking a jQuery, then make sure its readyWait
-            //is incremented to prevent its ready callbacks from
-            //triggering too soon.
-            if (context.jQuery && !context.jQueryIncremented) {
-                context.jQuery.readyWait += 1;
-                context.jQueryIncremented = true;
-            }
+        //If tracking a jQuery, then make sure its ready callbacks
+        //are put on hold to prevent its ready callbacks from
+        //triggering too soon.
+        if (context.jQuery && !context.jQueryIncremented) {
+            jQueryHoldReady(context.jQuery, true);
+            context.jQueryIncremented = true;
         }
     };
 
@@ -1645,7 +1728,7 @@ var require, define;
         if (useInteractive) {
             node = currentlyAddingScript || getInteractiveScript();
             if (!node) {
-                return req.onError(new Error("ERROR: No matching script interactive for " + callback));
+                return req.onError(makeError("interactive", "No matching script interactive for " + callback));
             }
             if (!name) {
                 name = node.getAttribute("data-requiremodule");
@@ -1668,6 +1751,15 @@ var require, define;
         multiversion: true,
         plugins: true,
         jQuery: true
+    };
+
+    /**
+     * Executes the text. Normally just uses eval, but can be modified
+     * to use a more environment specific call.
+     * @param {String} text the text to execute/evaluate.
+     */
+    req.exec = function (text) {
+        return eval(text);
     };
 
     /**
@@ -1726,17 +1818,19 @@ var require, define;
      * environment. Right now only supports browser loading,
      * but can be redefined in other environments to do the right thing.
      * @param {String} url the url of the script to attach.
-     * @param {String} contextName the name of the context that wants the script.
+     * @param {Object} context the context that wants the script.
      * @param {moduleName} the name of the module that is associated with the script.
      * @param {Function} [callback] optional callback, defaults to require.onScriptLoad
      * @param {String} [type] optional type, defaults to text/javascript
      */
-    req.attach = function (url, contextName, moduleName, callback, type) {
-        var node, loaded, context;
+    req.attach = function (url, context, moduleName, callback, type) {
+        var node, loaded;
         if (isBrowser) {
             //In the browser so use a script tag
             callback = callback || req.onScriptLoad;
-            node = document.createElement("script");
+            node = context && context.config && context.config.xhtml ?
+                    document.createElementNS("http://www.w3.org/1999/xhtml", "html:script") :
+                    document.createElement("script");
             node.type = type || "text/javascript";
             node.charset = "utf-8";
             //Use async so Gecko does not block on executing the script if something
@@ -1751,7 +1845,9 @@ var require, define;
             //plugin
             node.async = !s.skipAsync[url];
 
-            node.setAttribute("data-requirecontext", contextName);
+            if (context) {
+                node.setAttribute("data-requirecontext", context.contextName);
+            }
             node.setAttribute("data-requiremodule", moduleName);
 
             //Set up load listener. Test attachEvent first because IE9 has
@@ -1765,9 +1861,9 @@ var require, define;
             if (node.attachEvent && !isOpera) {
                 //Probably IE. IE (at least 6-8) do not fire
                 //script onload right after executing the script, so
-                //we cannot tie the anonymous require.def call to a name.
+                //we cannot tie the anonymous define call to a name.
                 //However, IE reports the script as being in "interactive"
-                //readyState at the time of the require.def call.
+                //readyState at the time of the define call.
                 useInteractive = true;
                 node.attachEvent("onreadystatechange", callback);
             } else {
@@ -1776,7 +1872,7 @@ var require, define;
             node.src = url;
 
             //For some cache cases in IE 6-8, the script executes before the end
-            //of the appendChild execution, so to tie an anonymous require.def
+            //of the appendChild execution, so to tie an anonymous define
             //call to the module name (which is stored on the node), hold on
             //to a reference to this node, but clear after the DOM insertion.
             currentlyAddingScript = node;
@@ -1794,7 +1890,6 @@ var require, define;
             //are in play, the expectation that a build has been done so that
             //only one script needs to be loaded anyway. This may need to be
             //reevaluated if other use cases become common.
-            context = contexts[contextName];
             loaded = context.loaded;
             loaded[moduleName] = false;
 
@@ -1903,14 +1998,13 @@ var require, define;
                 }
             }
 
-            //If jQuery with readyWait is being tracked, updated its
-            //readyWait count.
+            //If jQuery with DOM ready delayed, release it now.
             contexts = s.contexts;
             for (prop in contexts) {
                 if (!(prop in empty)) {
                     context = contexts[prop];
                     if (context.jQueryIncremented) {
-                        context.jQuery.ready(true);
+                        jQueryHoldReady(context.jQuery, false);
                         context.jQueryIncremented = false;
                     }
                 }
@@ -2036,8 +2130,12 @@ var require, define;
 
 }());
     } else if (env === 'node') {
-        this.require = require;
-        this.define = define;
+        this.requirejsVars = {
+            require: require,
+            define: define,
+            nodeRequire: nodeRequire
+        };
+        require.nodeRequire = nodeRequire;
 
         /**
  * @license RequireJS node Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
@@ -2046,7 +2144,7 @@ var require, define;
  */
 
 /*jslint regexp: false, strict: false */
-/*global require: false, define: false, nodeRequire: true, process: false */
+/*global require: false, define: false, requirejsVars: false, process: false */
 
 /**
  * This adapter assumes that x.js has loaded it and set up
@@ -2054,23 +2152,19 @@ var require, define;
  * usage from within the requirejs directory. The general
  * node adapater is r.js.
  */
+
 (function () {
-    var req = nodeRequire,
-        fs = req('fs'),
-        path = req('path'),
-        vm = req('vm');
-
-    //Clear out the global set by x.js
-    nodeRequire = null;
-
-    //Make nodeRequire available off of require, to allow a script to
-    //add things to its require.paths for example.
-    require.nodeRequire = req;
+    var nodeReq = requirejsVars.nodeRequire,
+        req = requirejsVars.require,
+        def = requirejsVars.define,
+        fs = nodeReq('fs'),
+        path = nodeReq('path'),
+        vm = nodeReq('vm');
 
     //Supply an implementation that allows synchronous get of a module.
-    require.get = function (context, moduleName, relModuleMap) {
+    req.get = function (context, moduleName, relModuleMap) {
         if (moduleName === "require" || moduleName === "exports" || moduleName === "module") {
-            require.onError(new Error("Explicit require of " + moduleName + " is not allowed."));
+            req.onError(new Error("Explicit require of " + moduleName + " is not allowed."));
         }
 
         var ret,
@@ -2084,7 +2178,7 @@ var require, define;
         } else {
             if (ret === undefined) {
                 //Try to dynamically fetch it.
-                require.load(context, moduleName, moduleMap.url);
+                req.load(context, moduleName, moduleMap.url);
                 //The above call is sync, so can do the next thing safely.
                 ret = context.defined[moduleName];
             }
@@ -2093,11 +2187,20 @@ var require, define;
         return ret;
     };
 
-    require.load = function (context, moduleName, url) {
+    //Add wrapper around the code so that it gets the requirejs
+    //API instead of the Node API, and it is done lexically so
+    //that it survives later execution.
+    req.makeNodeWrapper = function (contents) {
+        return '(function (require, define) { ' +
+                contents +
+                '\n}(requirejsVars.require, requirejsVars.define));';
+    };
+
+    req.load = function (context, moduleName, url) {
         var contents;
 
         //isDone is used by require.ready()
-        require.s.isDone = false;
+        req.s.isDone = false;
 
         //Indicate a the module is in process of loading.
         context.loaded[moduleName] = false;
@@ -2105,17 +2208,33 @@ var require, define;
 
         if (path.existsSync(url)) {
             contents = fs.readFileSync(url, 'utf8');
-            vm.runInThisContext(contents, url);
+
+            contents = req.makeNodeWrapper(contents);
+            try {
+                vm.runInThisContext(contents, fs.realpathSync(url));
+            } catch (e) {
+                return req.onError(e);
+            }
         } else {
-            define(moduleName, function () {
-                return req(moduleName);
+            def(moduleName, function () {
+                return nodeReq(moduleName);
             });
         }
 
         //Support anonymous modules.
         context.completeLoad(moduleName);
+
+        return undefined;
+    };
+
+    //Override to provide the function wrapper for define/require.
+    req.exec = function (text) {
+        /*jslint evil: true */
+        text = req.makeNodeWrapper(text);
+        return eval(text);
     };
 }());
+
     }
 
     //Support a default file name to execute. Useful for hosted envs
@@ -2125,9 +2244,11 @@ var require, define;
         fileName = 'main.js';
     }
 
-    if (commandOption === 'o') {
-        //Do the optimizer work.
-
+    /**
+     * Loads the library files that can be used for the optimizer, or for other
+     * tasks.
+     */
+    function loadLib() {
         /**
  * @license Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
@@ -5884,32 +6005,70 @@ define('parse', ['uglifyjs/index'], function (uglify) {
     }
 
     /**
+     * Converts a regular JS array of strings to an AST node that
+     * represents that array.
+     * @param {Array} ary
+     * @param {Node} an AST node that represents an array of strings.
+     */
+    function toAstArray(ary) {
+        var output = [
+            'array',
+            []
+        ],
+        i, item;
+
+        for (i = 0; (item = ary[i]); i++) {
+            output[1].push([
+                'string',
+                item
+            ]);
+        }
+
+        return output;
+    }
+
+    /**
      * Validates a node as being an object literal (like for i18n bundles)
-     * or an array literal with just string members.
+     * or an array literal with just string members. If an array literal,
+     * only return array members that are full strings. So the caller of
+     * this function should use the return value as the new value for the
+     * node.
+     *
      * This function does not need to worry about comments, they are not
      * present in this AST.
+     *
+     * @param {Node} node an AST node.
+     *
+     * @returns {Node} an AST node to use for the valid dependencies.
+     * If null is returned, then it means the input node was not a valid
+     * dependency.
      */
     function validateDeps(node) {
-        var arrayArgs, i, dep;
+        var newDeps = ['array', []],
+            arrayArgs, i, dep;
+
+        if (!node) {
+            return null;
+        }
 
         if (isObjectLiteral(node) || node[0] === 'function') {
-            return true;
+            return node;
         }
 
         //Dependencies can be an object literal or an array.
         if (!isArrayLiteral(node)) {
-            return false;
+            return null;
         }
 
         arrayArgs = node[1];
 
         for (i = 0; i < arrayArgs.length; i++) {
             dep = arrayArgs[i];
-            if (dep[0] !== 'string') {
-                return false;
+            if (dep[0] === 'string') {
+                newDeps[1].push(dep);
             }
         }
-        return true;
+        return newDeps[1].length ? newDeps : null;
     }
 
     /**
@@ -5925,7 +6084,12 @@ define('parse', ['uglifyjs/index'], function (uglify) {
         var matches = [], result = null,
             astRoot = parser.parse(fileContents);
 
-        parse.recurse(astRoot, matches);
+        parse.recurse(astRoot, function () {
+            var parsed = parse.callToString.apply(parse, arguments);
+            if (parsed) {
+                matches.push(parsed);
+            }
+        });
 
         if (matches.length) {
             result = matches.join("\n");
@@ -5942,19 +6106,16 @@ define('parse', ['uglifyjs/index'], function (uglify) {
     /**
      * Handles parsing a file recursively for require calls.
      * @param {Array} parentNode the AST node to start with.
-     * @param {Array} matches where to store the string matches
+     * @param {Function} onMatch function to call on a parse match.
      */
-    parse.recurse = function (parentNode, matches) {
-        var i, node, parsed;
+    parse.recurse = function (parentNode, onMatch) {
+        var i, node;
         if (isArray(parentNode)) {
             for (i = 0; i < parentNode.length; i++) {
                 node = parentNode[i];
                 if (isArray(node)) {
-                    parsed = this.parseNode(node);
-                    if (parsed) {
-                        matches.push(parsed);
-                    }
-                    this.recurse(node, matches);
+                    this.parseNode(node, onMatch);
+                    this.recurse(node, onMatch);
                 }
             }
         }
@@ -5983,25 +6144,34 @@ define('parse', ['uglifyjs/index'], function (uglify) {
      */
     parse.getAnonDeps = function (fileName, fileContents) {
         var astRoot = parser.parse(fileContents),
-            deps = [],
-            defFunc = this.findAnonRequireDefCallback(astRoot),
+            defFunc = this.findAnonRequireDefCallback(astRoot);
+
+        return parse.getAnonDepsFromNode(defFunc);
+    };
+
+    /**
+     * Finds require("") calls inside a CommonJS anonymous module wrapped
+     * in a define function, given an AST node for the definition function.
+     * @param {Node} node the AST node for the definition function.
+     * @returns {Array} and array of dependency names. Can be of zero length.
+     */
+    parse.getAnonDepsFromNode = function (node) {
+        var deps = [],
             funcArgLength;
 
-        //Now look inside the def call's function for require calls.
-        if (defFunc) {
-            this.findRequireDepNames(defFunc, deps);
+        if (node) {
+            this.findRequireDepNames(node, deps);
 
             //If no deps, still add the standard CommonJS require, exports, module,
             //in that order, to the deps, but only if specified as function args.
             //In particular, if exports is used, it is favored over the return
             //value of the function, so only add it if asked.
-            funcArgLength = defFunc[2] && defFunc[2].length;
+            funcArgLength = node[2] && node[2].length;
             if (funcArgLength) {
                 deps = (funcArgLength > 1 ? ["require", "exports", "module"] :
                         ["require"]).concat(deps);
             }
         }
-
         return deps;
     };
 
@@ -6038,6 +6208,42 @@ define('parse', ['uglifyjs/index'], function (uglify) {
         }
 
         return null;
+    };
+
+    /**
+     * Finds all dependencies specified in dependency arrays and inside
+     * simplified commonjs wrappers.
+     * @param {String} fileName
+     * @param {String} fileContents
+     *
+     * @returns {Array} an array of dependency strings. The dependencies
+     * have not been normalized, they may be relative IDs.
+     */
+    parse.findDependencies = function (fileName, fileContents) {
+        //This is a litle bit inefficient, it ends up with two uglifyjs parser
+        //calls. Can revisit later, but trying to build out larger functional
+        //pieces first.
+        var dependencies = parse.getAnonDeps(fileName, fileContents),
+            astRoot = parser.parse(fileContents),
+            i, dep;
+
+        parse.recurse(astRoot, function (callName, config, name, deps) {
+            //Normalize the input args.
+            if (name && isArrayLiteral(name)) {
+                deps = name;
+                name = null;
+            }
+
+            if (!(deps = validateDeps(deps)) || !isArrayLiteral(deps)) {
+                return;
+            }
+
+            for (i = 0; (dep = deps[1][i]); i++) {
+                dependencies.push(dep[1]);
+            }
+        });
+
+        return dependencies;
     };
 
     parse.findRequireDepNames = function (node, deps) {
@@ -6139,7 +6345,7 @@ define('parse', ['uglifyjs/index'], function (uglify) {
             name = null;
         }
 
-        if (deps && !validateDeps(deps)) {
+        if (!(deps = validateDeps(deps))) {
             return null;
         }
 
@@ -6159,12 +6365,15 @@ define('parse', ['uglifyjs/index'], function (uglify) {
     /**
      * Determines if a specific node is a valid require or define/require.def call.
      * @param {Array} node
+     * @param {Function} onMatch a function to call when a match is found.
+     * It is passed the match name, and the config, name, deps possible args.
+     * The config, name and deps args are not normalized.
      *
      * @returns {String} a JS source string with the valid require/define call.
      * Otherwise null.
      */
-    parse.parseNode = function (node) {
-        var call, name, config, deps, args;
+    parse.parseNode = function (node, onMatch) {
+        var call, name, config, deps, args, cjsDeps;
 
         if (!isArray(node)) {
             return null;
@@ -6185,11 +6394,11 @@ define('parse', ['uglifyjs/index'], function (uglify) {
                         config = null;
                     }
 
-                    if (!deps || !validateDeps(deps)) {
+                    if (!(deps = validateDeps(deps))) {
                         return null;
                     }
 
-                    return this.callToString("require", null, null, deps);
+                    return onMatch("require", null, null, deps);
 
                 } else if ((call[0] === 'name' && call[1] === 'define') ||
                            (call[0] === 'dot' && call[1][1] === 'require' &&
@@ -6212,7 +6421,17 @@ define('parse', ['uglifyjs/index'], function (uglify) {
                           name[0] === 'function' || isObjectLiteral(name))) &&
                         (!deps || isArrayLiteral(deps) ||
                          deps[0] === 'function' || isObjectLiteral(deps))) {
-                        return this.callToString("define", null, name, deps);
+
+                        //If first arg is a function, could be a commonjs wrapper,
+                        //look inside for commonjs dependencies.
+                        if (name && name[0] === 'function') {
+                            cjsDeps = parse.getAnonDepsFromNode(name);
+                            if (cjsDeps.length) {
+                                name = toAstArray(cjsDeps);
+                            }
+                        }
+
+                        return onMatch("define", null, name, deps);
                     }
                 }
             }
@@ -6255,7 +6474,7 @@ if(env === 'rhino') {
  * see: http://github.com/jrburke/requirejs for details
  */
 
-/*jslint strict: false */
+/*jslint strict: false, plusplus: false */
 /*global define: false, java: false, Packages: false */
 
 define('rhino/optimize', ['logger'], function (logger) {
@@ -6313,7 +6532,8 @@ define('rhino/optimize', ['logger'], function (logger) {
                 //Set up source input
                 jsSourceFile = closurefromCode(String(fileName), String(fileContents)),
                 options, option, FLAG_compilation_level, compiler,
-                Compiler = Packages.com.google.javascript.jscomp.Compiler;
+                Compiler = Packages.com.google.javascript.jscomp.Compiler,
+                result;
 
             logger.trace("Minifying file: " + fileName);
 
@@ -6334,7 +6554,12 @@ define('rhino/optimize', ['logger'], function (logger) {
             //Trigger the compiler
             Compiler.setLoggingLevel(Packages.java.util.logging.Level[config.loggingLevel || 'WARNING']);
             compiler = new Compiler();
-            compiler.compile(externSourceFile, jsSourceFile, options);
+
+            result = compiler.compile(externSourceFile, jsSourceFile, options);
+            if (!result.success) {
+                throw new Error("Closure Compiler compilation failed");
+            }
+
             return compiler.toSource();
         }
     };
@@ -6351,8 +6576,10 @@ define('rhino/optimize', ['logger'], function (logger) {
 /*jslint plusplus: false, nomen: false, regexp: false, strict: false */
 /*global define: false */
 
-define('optimize', [ 'lang', 'logger', 'env!env/optimize', 'env!env/file', 'uglifyjs/index'],
-function (lang,   logger,   envOptimize,        file,           uglify) {
+define('optimize', [ 'lang', 'logger', 'env!env/optimize', 'env!env/file', 'parse',
+         'uglifyjs/index'],
+function (lang,   logger,   envOptimize,        file,           parse,
+          uglify) {
 
     var optimize,
         cssImportRegExp = /\@import\s+(url\()?\s*([^);]+)\s*(\))?([\w, ]*)(;)?/g,
@@ -6471,22 +6698,44 @@ function (lang,   logger,   envOptimize,        file,           uglify) {
 
     optimize = {
         /**
-         * Optimizes a file that contains JavaScript content. It will inline
-         * text plugin files and run it through Google Closure Compiler
-         * minification, if the config options specify it.
+         * Optimizes a file that contains JavaScript content. Optionally collects
+         * plugin resources mentioned in a file, and then passes the content
+         * through an minifier if one is specified via config.optimize.
          *
          * @param {String} fileName the name of the file to optimize
          * @param {String} outFileName the name of the file to use for the
          * saved optimized content.
          * @param {Object} config the build config object.
+         * @param {String} [moduleName] the module name to use for the file.
+         * Used for plugin resource collection.
+         * @param {Array} [pluginCollector] storage for any plugin resources
+         * found.
          */
-        jsFile: function (fileName, outFileName, config) {
+        jsFile: function (fileName, outFileName, config, moduleName, pluginCollector) {
             var parts = (config.optimize + "").split('.'),
                 optimizerName = parts[0],
                 keepLines = parts[1] === 'keepLines',
-                fileContents, optFunc;
+                fileContents, optFunc, deps, i, dep;
 
             fileContents = file.readFile(fileName);
+
+            //If there is a plugin collector, scan the file for plugin resources.
+            if (config.optimizeAllPluginResources && pluginCollector) {
+                try {
+                    deps = parse.findDependencies(fileName, fileContents);
+                    if (deps.length) {
+                        for (i = 0; (dep = deps[i]); i++) {
+                            if (dep.indexOf('!') !== -1) {
+                                (pluginCollector[moduleName] ||
+                                 (pluginCollector[moduleName] = [])).push(dep);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger.error('Parse error looking for plugin resources in ' +
+                                 fileName + ', skipping.');
+                }
+            }
 
             //Optimize the JS files if asked.
             if (optimizerName && optimizerName !== 'none') {
@@ -6783,7 +7032,8 @@ function (file,           pragma,   parse) {
             //on Windows, full paths are used for some urls, which include
             //the drive, like c:/something, so need to test for something other
             //than just a colon.
-            return url.indexOf("://") === -1 && url.indexOf("?") === -1;
+            return url.indexOf("://") === -1 && url.indexOf("?") === -1 &&
+                   url.indexOf('empty:') !== 0;
         };
 
         //Override require.def to catch modules that just define an object, so that
@@ -6918,6 +7168,158 @@ function (file,           pragma,   parse) {
     };
 });
 /**
+ * @license RequireJS Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
+ * Available via the MIT or new BSD license.
+ * see: http://github.com/jrburke/requirejs for details
+ */
+
+/*jslint plusplus: false, regexp: false, strict: false */
+/*global define: false, console: false */
+
+define('commonJs', ['env!env/file', 'uglifyjs/index'], function (file, uglify) {
+    var commonJs = {
+        depRegExp: /require\s*\(\s*["']([\w-_\.\/]+)["']\s*\)/g,
+
+        //Set this to false in non-rhino environments. If rhino, then it uses
+        //rhino's decompiler to remove comments before looking for require() calls,
+        //otherwise, it will use a crude regexp approach to remove comments. The
+        //rhino way is more robust, but he regexp is more portable across environments.
+        useRhino: true,
+
+        //Set to false if you do not want this file to log. Useful in environments
+        //like node where you want the work to happen without noise.
+        useLog: true,
+
+        convertDir: function (commonJsPath, savePath) {
+            var fileList, i,
+                jsFileRegExp = /\.js$/,
+                fileName, convertedFileName, fileContents;
+
+            //Get list of files to convert.
+            fileList = file.getFilteredFileList(commonJsPath, /\w/, true);
+
+            //Normalize on front slashes and make sure the paths do not end in a slash.
+            commonJsPath = commonJsPath.replace(/\\/g, "/");
+            savePath = savePath.replace(/\\/g, "/");
+            if (commonJsPath.charAt(commonJsPath.length - 1) === "/") {
+                commonJsPath = commonJsPath.substring(0, commonJsPath.length - 1);
+            }
+            if (savePath.charAt(savePath.length - 1) === "/") {
+                savePath = savePath.substring(0, savePath.length - 1);
+            }
+
+            //Cycle through all the JS files and convert them.
+            if (!fileList || !fileList.length) {
+                if (commonJs.useLog) {
+                    if (commonJsPath === "convert") {
+                        //A request just to convert one file.
+                        console.log('\n\n' + commonJs.convert(savePath, file.readFile(savePath)));
+                    } else {
+                        console.log("No files to convert in directory: " + commonJsPath);
+                    }
+                }
+            } else {
+                for (i = 0; (fileName = fileList[i]); i++) {
+                    convertedFileName = fileName.replace(commonJsPath, savePath);
+
+                    //Handle JS files.
+                    if (jsFileRegExp.test(fileName)) {
+                        fileContents = file.readFile(fileName);
+                        fileContents = commonJs.convert(fileName, fileContents);
+                        file.saveUtf8File(convertedFileName, fileContents);
+                    } else {
+                        //Just copy the file over.
+                        file.copyFile(fileName, convertedFileName, true);
+                    }
+                }
+            }
+        },
+
+        /**
+         * Removes the comments from a string.
+         *
+         * @param {String} fileContents
+         * @param {String} fileName mostly used for informative reasons if an error.
+         *
+         * @returns {String} a string of JS with comments removed.
+         */
+        removeComments: function (fileContents, fileName) {
+            //Uglify's ast generation removes comments, so just convert to ast,
+            //then back to source code to get rid of comments.
+            return uglify.uglify.gen_code(uglify.parser.parse(fileContents), true);
+        },
+
+        /**
+         * Regexp for testing if there is already a require.def call in the file,
+         * in which case do not try to convert it.
+         */
+        defRegExp: /(require\s*\.\s*def|define)\s*\(/,
+
+        /**
+         * Regexp for testing if there is a require([]) or require(function(){})
+         * call, indicating the file is already in requirejs syntax.
+         */
+        rjsRegExp: /require\s*\(\s*(\[|function)/,
+
+        /**
+         * Does the actual file conversion.
+         *
+         * @param {String} fileName the name of the file.
+         *
+         * @param {String} fileContents the contents of a file :)
+         *
+         * @param {Boolean} skipDeps if true, require("") dependencies
+         * will not be searched, but the contents will just be wrapped in the
+         * standard require, exports, module dependencies. Only usable in sync
+         * environments like Node where the require("") calls can be resolved on
+         * the fly.
+         *
+         * @returns {String} the converted contents
+         */
+        convert: function (fileName, fileContents, skipDeps) {
+            //Strip out comments.
+            try {
+                var deps = [], depName, match,
+                    //Remove comments
+                    tempContents = commonJs.removeComments(fileContents, fileName);
+
+                //First see if the module is not already RequireJS-formatted.
+                if (commonJs.defRegExp.test(tempContents) || commonJs.rjsRegExp.test(tempContents)) {
+                    return fileContents;
+                }
+
+                //Reset the regexp to start at beginning of file. Do this
+                //since the regexp is reused across files.
+                commonJs.depRegExp.lastIndex = 0;
+
+                if (!skipDeps) {
+                    //Find dependencies in the code that was not in comments.
+                    while ((match = commonJs.depRegExp.exec(tempContents))) {
+                        depName = match[1];
+                        if (depName) {
+                            deps.push('"' + depName + '"');
+                        }
+                    }
+                }
+
+                //Construct the wrapper boilerplate.
+                fileContents = 'define(["require", "exports", "module"' +
+                       (deps.length ? ', ' + deps.join(",") : '') + '], ' +
+                       'function(require, exports, module) {\n' +
+                       fileContents +
+                       '\n});\n';
+            } catch (e) {
+                console.log("COULD NOT CONVERT: " + fileName + ", so skipping it. Error was: " + e);
+                return fileContents;
+            }
+
+            return fileContents;
+        }
+    };
+
+    return commonJs;
+});
+/**
  * @license Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
@@ -6941,16 +7343,38 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
             optimize: "uglify",
             optimizeCss: "standard.keepLines",
             inlineText: true,
-            isBuild: true
+            isBuild: true,
+            optimizeAllPluginResources: false
         };
+
+    /**
+     * If the path looks like an URL, throw an error. This is to prevent
+     * people from using URLs with protocols in the build config, since
+     * the optimizer is not set up to do network access.
+     */
+    function disallowUrls(path) {
+        if (path.indexOf(':') !== -1 && path !== 'empty:') {
+            throw new Error('Path is not supported: ' + path +
+                            '\nOptimizer can only handle' +
+                            ' local paths. Download the locally if necessary' +
+                            ' and update the config to use a local path.');
+        }
+    }
 
     function endsWithSlash(dirName) {
         if (dirName.charAt(dirName.length - 1) !== "/") {
             dirName += "/";
         }
+        disallowUrls(dirName);
         return dirName;
     }
 
+    //Method used by plugin writeFile calls, defined up here to avoid
+    //jslint warning about "making a function in a loop".
+    function writeFile(name, contents) {
+        logger.trace('Saving plugin-optimized file: ' + name);
+        file.saveUtf8File(name, contents);
+    }
 
     /**
      * Main API entry point into the build. The args argument can either be
@@ -7010,11 +7434,13 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
 
     build._run = function (cmdConfig) {
         var buildFileContents = "",
+            pluginCollector = {},
             buildPaths, fileName, fileNames,
             prop, paths, i,
             baseConfig, config,
             modules, builtModule, srcPath, buildContext,
-            destPath;
+            destPath, moduleName, moduleMap, parentModuleMap, context,
+            resources, resource, pluginProcessed = {}, plugin;
 
         //Can now run the patches to require.js to allow it to be used for
         //build generation. Do it here instead of at the top of the module
@@ -7042,7 +7468,7 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
                 for (prop in paths) {
                     if (paths.hasOwnProperty(prop)) {
                         //Set up build path for each path prefix.
-                        buildPaths[prop] = prop.replace(/\./g, "/");
+                        buildPaths[prop] = paths[prop] === 'empty:' ? 'empty:' : prop.replace(/\./g, "/");
 
                         //Make sure source path is fully formed with baseUrl,
                         //if it is a relative URL.
@@ -7053,15 +7479,18 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
 
                         destPath = config.dirBaseUrl + buildPaths[prop];
 
-                        //If the srcPath is a directory, copy the whole directory.
-                        if (file.exists(srcPath) && file.isDirectory(srcPath)) {
-                            //Copy files to build area. Copy all files (the /\w/ regexp)
-                            file.copyDir(srcPath, destPath, /\w/, true);
-                        } else {
-                            //Try a .js extension
-                            srcPath += '.js';
-                            destPath += '.js';
-                            file.copyFile(srcPath, destPath);
+                        //Skip empty: paths
+                        if (srcPath !== 'empty:') {
+                            //If the srcPath is a directory, copy the whole directory.
+                            if (file.exists(srcPath) && file.isDirectory(srcPath)) {
+                                //Copy files to build area. Copy all files (the /\w/ regexp)
+                                file.copyDir(srcPath, destPath, /\w/, true);
+                            } else {
+                                //Try a .js extension
+                                srcPath += '.js';
+                                destPath += '.js';
+                                file.copyFile(srcPath, destPath);
+                            }
                         }
                     }
                 }
@@ -7125,6 +7554,13 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
                     }
                 });
             }
+        }
+
+        //Run CSS optimizations before doing JS module tracing, to allow
+        //things like text loader plugins loading CSS to get the optimized
+        //CSS.
+        if (config.optimizeCss && config.optimizeCss !== "none") {
+            optimize.css(config.dir, config);
         }
 
         if (modules) {
@@ -7192,13 +7628,68 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
             //JS optimizations.
             fileNames = file.getFilteredFileList(config.dir, /\.js$/, true);
             for (i = 0; (fileName = fileNames[i]); i++) {
-                optimize.jsFile(fileName, fileName, config);
+                //Generate the module name from the config.dir root.
+                moduleName = fileName.replace(config.dir, '');
+                //Get rid of the extension
+                moduleName = moduleName.substring(0, moduleName.length - 3);
+                optimize.jsFile(fileName, fileName, config, moduleName, pluginCollector);
             }
 
-            //CSS optimizations
-            if (config.optimizeCss && config.optimizeCss !== "none") {
-                optimize.css(config.dir, config);
+            //Normalize all the plugin resources.
+            context = require.s.contexts._;
+
+            for (moduleName in pluginCollector) {
+                if (pluginCollector.hasOwnProperty(moduleName)) {
+                    parentModuleMap = context.makeModuleMap(moduleName);
+                    resources = pluginCollector[moduleName];
+                    for (i = 0; (resource = resources[i]); i++) {
+                        moduleMap = context.makeModuleMap(resource, parentModuleMap);
+                        if (!context.plugins[moduleMap.prefix]) {
+                            //Set the value in context.plugins so it
+                            //will be evaluated as a full plugin.
+                            context.plugins[moduleMap.prefix] = true;
+
+                            //Do not bother if the plugin is not available.
+                            if (!file.exists(require.toUrl(moduleMap.prefix + '.js'))) {
+                                continue;
+                            }
+
+                            //Rely on the require in the build environment
+                            //to be synchronous
+                            context.require([moduleMap.prefix]);
+
+                            //Now that the plugin is loaded, redo the moduleMap
+                            //since the plugin will need to normalize part of the path.
+                            moduleMap = context.makeModuleMap(resource, parentModuleMap);
+                        }
+
+                        //Only bother with plugin resources that can be handled
+                        //processed by the plugin, via support of the writeFile
+                        //method.
+                        if (!pluginProcessed[moduleMap.fullName]) {
+                            //Only do the work if the plugin was really loaded.
+                            //Using an internal access because the file may
+                            //not really be loaded.
+                            plugin = context.defined[moduleMap.prefix];
+                            if (plugin && plugin.writeFile) {
+                                plugin.writeFile(
+                                    moduleMap.prefix,
+                                    moduleMap.name,
+                                    require,
+                                    writeFile,
+                                    context.config
+                                );
+                            }
+
+                            pluginProcessed[moduleMap.fullName] = true;
+                        }
+                    }
+
+                }
             }
+
+            //console.log('PLUGIN COLLECTOR: ' + JSON.stringify(pluginCollector, null, "  "));
+
 
             //All module layers are done, write out the build.txt file.
             file.saveUtf8File(config.dir + "build.txt", buildFileContents);
@@ -7324,7 +7815,7 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
             buildFileContents = file.readFile(buildFile);
             try {
                 buildFileConfig = eval("(" + buildFileContents + ")");
-            } catch(e) {
+            } catch (e) {
                 throw new Error("Build file " + buildFile + " is malformed: " + e);
             }
             lang.mixin(config, buildFileConfig, true);
@@ -7406,6 +7897,15 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
                 }
 
                 config[prop] = endsWithSlash(config[prop]);
+            }
+        }
+
+        //Do not allow URLs for paths resources.
+        if (config.paths) {
+            for (prop in config.paths) {
+                if (config.paths.hasOwnProperty(prop)) {
+                    disallowUrls(config.paths[prop]);
+                }
             }
         }
 
@@ -7567,7 +8067,7 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
                         fileContents += input;
                     };
                     writeApi.asModule = function (moduleName, input) {
-                        fileContents += build.toTransport(moduleName, path, input, layer);
+                        fileContents += "\n" + build.toTransport(moduleName, path, input, layer);
                     };
                     builder.write(parts.prefix, parts.name, writeApi);
                 }
@@ -7577,7 +8077,7 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
 
                 currContents = build.toTransport(moduleName, path, currContents, layer);
 
-                fileContents += currContents;
+                fileContents += "\n" + currContents;
             }
 
             buildFileContents += path.replace(config.dir, "") + "\n";
@@ -7596,7 +8096,7 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
                                    'define("jquery", [], function () { return jq; });\n' +
                                    '}());\n';
                 } else {
-                    fileContents += 'define("' + moduleName + '", function(){});\n';
+                    fileContents += '\ndefine("' + moduleName + '", function(){});\n';
                 }
             }
         }
@@ -7611,11 +8111,11 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
     //avoid issues with some Dojo transition modules that use a
     //define(\n//begin v1.x content
     //for a comment.
-    build.anonDefRegExp = /(require\s*\.\s*def|define)\s*\(\s*(\/\/[^\n\r]*[\r\n])?(\[|f|\{)/;
+    build.anonDefRegExp = /(^|[^\.])(require\s*\.\s*def|define)\s*\(\s*(\/\/[^\n\r]*[\r\n])?(\[|f|\{)/;
 
     build.toTransport = function (moduleName, path, contents, layer) {
         //If anonymous module, insert the module name.
-        return contents.replace(build.anonDefRegExp, function (match, callName, possibleComment, suffix) {
+        return contents.replace(build.anonDefRegExp, function (match, start, callName, possibleComment, suffix) {
             layer.modulesWithNames[moduleName] = true;
 
             //Look for CommonJS require calls inside the function if this is
@@ -7642,18 +8142,20 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
 
     return build;
 });
-/**
+
+    }
+
+    if (commandOption === 'o') {
+        //Do the optimizer work.
+        loadLib();
+
+        /**
  * @license Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
 
 /*
- * Use the .sh or .bat build scripts to run this script. General use:
- * executingEnv build.js directory/containing/build.js/ profile.build.js
- *
- * General use:
- *
  * Create a build.js file that has the build options you want and pass that
  * build file to this file to do the build. See example.build.js for more information.
  */
@@ -7693,21 +8195,32 @@ function (args,            build) {
 });
 
 
-        //END OPTIMIZER
-
-        //If fileName does not a command line arg to
-        //the build, then open it as a build profile.
-        if (fileName && fileName.indexOf('=') === -1) {
-            if (exists(fileName)) {
-                exec(readFile(fileName), fileName);
-            } else {
-                showHelp();
-            }
-        }
     } else if (commandOption === 'v') {
-        console.log('r.js: ' + version + ', RequireJS: ' + require.version);
+        console.log('r.js: ' + version + ', RequireJS: ' + this.requirejsVars.require.version);
+    } else if (commandOption === 'convert') {
+        loadLib();
+
+        this.requirejsVars.require(['env!env/args', 'commonJs', 'env!env/print'],
+        function (args,           commonJs,   print) {
+
+            var srcDir, outDir;
+            srcDir = args[0];
+            outDir = args[1];
+
+            if (!srcDir || !outDir) {
+                print('Usage: path/to/commonjs/modules output/dir');
+                return;
+            }
+
+            commonJs.convertDir(args[0], args[1]);
+        });
     } else {
         //Just run an app
+
+        //Load the bundled libraries for use in the app.
+        if (commandOption === 'lib') {
+            loadLib();
+        }
 
         //Use the file name's directory as the baseUrl if available.
         dir = fileName.replace(/\\/g, '/');
@@ -7719,6 +8232,15 @@ function (args,            build) {
         }
 
         if (exists(fileName)) {
+            if (env === 'node') {
+                //Put the file name's directory on the paths
+                //so node_modules in that directory will be
+                //consulted instead of relying on a node_modules
+                //in the r.js location.
+                //Put the current working direct
+                nodeRequire.paths.unshift(path.join(path.dirname(fs.realpathSync(fileName)), 'node_modules'));
+            }
+
             exec(readFile(fileName), fileName);
         } else {
             showHelp();

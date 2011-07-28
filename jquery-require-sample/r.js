@@ -1,5 +1,5 @@
 /**
- * @license r.js 0.24.0+ Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
+ * @license r.js 0.25.0 Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
@@ -20,7 +20,7 @@ var requirejs, require, define;
 
     var fileName, env, fs, vm, path, exec, rhinoContext, dir, nodeRequire,
         nodeDefine, exists,
-        version = '0.24.0+',
+        version = '0.25.0',
         jsSuffixRegExp = /\.js$/,
         //Indicates so build/build.js that the modules for the optimizer
         //are built-in.
@@ -103,7 +103,7 @@ var requirejs, require, define;
     }
 
     /** vim: et:ts=4:sw=4:sts=4
- * @license RequireJS 0.24.0+ Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
+ * @license RequireJS 0.25.0 Copyright (c) 2010-2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
@@ -115,7 +115,7 @@ var requirejs, require, define;
 
 (function () {
     //Change this version number for each release.
-    var version = "0.24.0+",
+    var version = "0.25.0",
         commentRegExp = /(\/\*([\s\S]*?)\*\/|\/\/(.*)$)/mg,
         cjsRequireRegExp = /require\(["']([^'"\s]+)["']\)/g,
         currDirRegExp = /^\.\//,
@@ -2197,7 +2197,7 @@ var requirejs, require, define;
     };
 
     req.load = function (context, moduleName, url) {
-        var contents;
+        var contents, err;
 
         //isDone is used by require.ready()
         req.s.isDone = false;
@@ -2213,11 +2213,24 @@ var requirejs, require, define;
             try {
                 vm.runInThisContext(contents, fs.realpathSync(url));
             } catch (e) {
-                return req.onError(e);
+                err = new Error('Evaluating ' + url + ' as module "' +
+                                moduleName + '" failed with error: ' + e);
+                err.originalError = e;
+                err.moduleName = moduleName;
+                err.fileName = url;
+                return req.onError(err);
             }
         } else {
             def(moduleName, function () {
-                return nodeReq(moduleName);
+                try {
+                    return nodeReq(moduleName);
+                } catch (e) {
+                    err = new Error('Calling node\'s require("' +
+                                        moduleName + '") failed with error: ' + e);
+                    err.originalError = e;
+                    err.moduleName = moduleName;
+                    return req.onError(err);
+                }
             });
         }
 
@@ -2953,6 +2966,10 @@ define('logger', ['env!env/print'], function (print) {
         ERROR: 3,
         level: 0,
         logPrefix: "",
+
+        logLevel: function( level ) {
+            this.level = level;
+        },
 
         trace: function (message) {
             if (this.level <= this.TRACE) {
@@ -7450,6 +7467,10 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
 
         config = build.createConfig(cmdConfig);
         paths = config.paths;
+
+        if ( config.logLevel ) {
+            logger.logLevel( config.logLevel );
+        }
 
         if (!config.out && !config.cssIn) {
             //This is not just a one-off file build but a full build profile, with

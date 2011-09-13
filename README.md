@@ -7,7 +7,7 @@ See the [Use with jQuery](http://requirejs.org/docs/jquery.html) page on the Req
 The sample project uses a require-jquery.js file which is a combination of three files:
 
 * RequireJS, version 0.26.0
-* jQuery, version 1.6.3
+* jQuery, version 1.6.4
 * [post.js](require-jquery/blob/master/parts/post.js), which just registers jQuery as a module.
 
 This project will be kept relatively up to date with the latest jQuery and RequireJS files as they are released.

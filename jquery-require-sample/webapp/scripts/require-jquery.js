@@ -2011,7 +2011,7 @@ var requirejs, require, define;
     }
 }());
 /*!
- * jQuery JavaScript Library v1.6.3
+ * jQuery JavaScript Library v1.6.4
  * http://jquery.com/
  *
  * Copyright 2011, John Resig
@@ -2023,7 +2023,7 @@ var requirejs, require, define;
  * Copyright 2011, The Dojo Foundation
  * Released under the MIT, BSD, and GPL Licenses.
  *
- * Date: Wed Aug 31 10:35:15 2011 -0400
+ * Date: Mon Sep 12 18:54:48 2011 -0400
  */
 (function( window, undefined ) {
 
@@ -2225,7 +2225,7 @@ jQuery.fn = jQuery.prototype = {
 	selector: "",
 
 	// The current version of jQuery being used
-	jquery: "1.6.3",
+	jquery: "1.6.4",
 
 	// The default length of a jQuery object is 0
 	length: 0,
@@ -3191,7 +3191,7 @@ jQuery.support = (function() {
 
 	// Preliminary tests
 	div.setAttribute("className", "t");
-	div.innerHTML = "   <link><table></table><a href='/a' style='top:1px;float:left;opacity:.55;'>a</a><input type=checkbox>";
+	div.innerHTML = "   <link/><table></table><a href='/a' style='top:1px;float:left;opacity:.55;'>a</a><input type='checkbox'/>";
 
 
 	all = div.getElementsByTagName( "*" );
@@ -3426,7 +3426,7 @@ jQuery.boxModel = jQuery.support.boxModel;
 
 
 var rbrace = /^(?:\{.*\}|\[.*\])$/,
-	rmultiDash = /([a-z])([A-Z])/g;
+	rmultiDash = /([A-Z])/g;
 
 jQuery.extend({
 	cache: {},
@@ -3741,7 +3741,8 @@ function dataAttr( elem, key, data ) {
 	// If nothing was found internally, try to fetch any
 	// data from the HTML5 data-* attribute
 	if ( data === undefined && elem.nodeType === 1 ) {
-		var name = "data-" + key.replace( rmultiDash, "$1-$2" ).toLowerCase();
+
+		var name = "data-" + key.replace( rmultiDash, "-$1" ).toLowerCase();
 
 		data = elem.getAttribute( name );
 
@@ -5282,8 +5283,9 @@ if ( !jQuery.support.submitBubbles ) {
 		setup: function( data, namespaces ) {
 			if ( !jQuery.nodeName( this, "form" ) ) {
 				jQuery.event.add(this, "click.specialSubmit", function( e ) {
+					// Avoid triggering error on non-existent type attribute in IE VML (#7071)
 					var elem = e.target,
-						type = jQuery.nodeName( elem, "input" ) ? elem.type : "";
+						type = jQuery.nodeName( elem, "input" ) || jQuery.nodeName( elem, "button" ) ? elem.type : "";
 
 					if ( (type === "submit" || type === "image") && jQuery( elem ).closest("form").length ) {
 						trigger( "submit", this, arguments );
@@ -5292,7 +5294,7 @@ if ( !jQuery.support.submitBubbles ) {
 
 				jQuery.event.add(this, "keypress.specialSubmit", function( e ) {
 					var elem = e.target,
-						type = jQuery.nodeName( elem, "input" ) ? elem.type : "";
+						type = jQuery.nodeName( elem, "input" ) || jQuery.nodeName( elem, "button" ) ? elem.type : "";
 
 					if ( (type === "text" || type === "password") && jQuery( elem ).closest("form").length && e.keyCode === 13 ) {
 						trigger( "submit", this, arguments );
@@ -11054,7 +11056,6 @@ jQuery.each([ "Height", "Width" ], function( i, name ) {
 // Expose jQuery to the global object
 window.jQuery = window.$ = jQuery;
 })(window);
-
 //Register jQuery as a module.
 if (typeof define !== "undefined" && define.amd) {
     define('jquery',[], function() {return jQuery });

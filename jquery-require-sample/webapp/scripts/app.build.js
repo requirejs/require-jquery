@@ -7,21 +7,14 @@
     optimize: "none",
 
     paths: {
-        "jquery": "require-jquery"
+        "jquery": "empty:"
     },
 
     modules: [
-        //Optimize the require-jquery.js file by applying any minification
-        //that is desired via the optimize: setting above.
+        //Optimize the application files. jQuery is not 
+        //included since it is already in require-jquery.js
         {
-            name: "require-jquery"
-        },
-
-        //Optimize the application files. Exclude jQuery since it is
-        //included already in require-jquery.js
-        {
-            name: "main",
-            exclude: ["jquery"]
+            name: "main"
         }
     ]
 })

@@ -1,5 +1,5 @@
 /**
- * @license r.js 2.0.5 Copyright (c) 2010-2012, The Dojo Foundation All Rights Reserved.
+ * @license r.js 2.0.6 Copyright (c) 2010-2012, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
@@ -20,7 +20,7 @@ var requirejs, require, define;
 
     var fileName, env, fs, vm, path, exec, rhinoContext, dir, nodeRequire,
         nodeDefine, exists, reqMain, loadedOptimizedLib, existsForNode,
-        version = '2.0.5',
+        version = '2.0.6',
         jsSuffixRegExp = /\.js$/,
         commandOption = '',
         useLibLoaded = {},
@@ -105,7 +105,7 @@ var requirejs, require, define;
     }
 
     /** vim: et:ts=4:sw=4:sts=4
- * @license RequireJS 2.0.5 Copyright (c) 2010-2012, The Dojo Foundation All Rights Reserved.
+ * @license RequireJS 2.0.6 Copyright (c) 2010-2012, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
@@ -118,7 +118,7 @@ var requirejs, require, define;
 (function (global) {
     var req, s, head, baseElement, dataMain, src,
         interactiveScript, currentlyAddingScript, mainScript, subPath,
-        version = '2.0.5',
+        version = '2.0.6',
         commentRegExp = /(\/\*([\s\S]*?)\*\/|([^:]|^)\/\/(.*)$)/mg,
         cjsRequireRegExp = /[^.]\s*require\s*\(\s*["']([^'"\s]+)["']\s*\)/g,
         jsSuffixRegExp = /\.js$/,
@@ -718,7 +718,7 @@ var requirejs, require, define;
             });
         }
 
-        function findCycle(mod, traced) {
+        function findCycle(mod, traced, processed) {
             var id = mod.map.id,
                 depArray = mod.depMaps,
                 foundModule;
@@ -741,27 +741,15 @@ var requirejs, require, define;
                 var depId = depMap.id,
                     depMod = registry[depId];
 
-                if (!depMod) {
+                if (!depMod || processed[depId] ||
+                        !depMod.inited || !depMod.enabled) {
                     return;
                 }
 
-                if (!depMod.inited || !depMod.enabled) {
-                    //Dependency is not inited, so this cannot
-                    //be used to determine a cycle.
-                    foundModule = null;
-                    delete traced[id];
-                    return true;
-                }
-
-                //mixin traced to a new object for each dependency, so that
-                //sibling dependencies in this object to not generate a
-                //false positive match on a cycle. Ideally an Object.create
-                //type of prototype delegation would be used here, but
-                //optimizing for file size vs. execution speed since hopefully
-                //the trees are small for circular dependency scans relative
-                //to the full app perf.
-                return (foundModule = findCycle(depMod, mixin({}, traced)));
+                return (foundModule = findCycle(depMod, traced, processed));
             });
+
+            processed[id] = true;
 
             return foundModule;
         }
@@ -885,7 +873,7 @@ var requirejs, require, define;
                         return;
                     }
 
-                    var cycleMod = findCycle(mod, {}),
+                    var cycleMod = findCycle(mod, {}, {}),
                         traced = {};
 
                     if (cycleMod) {
@@ -9471,9 +9459,13 @@ exports.is_identifier_char = is_identifier_char;
 exports.set_logger = function(logger) {
         warn = logger;
 };
+
+// Local variables:
+// js-indent-level: 8
+// End:
 });
-define('uglifyjs/squeeze-more', ["require", "exports", "module", "./parse-js", "./process"], function(require, exports, module) {
-    var jsp = require("./parse-js"),
+define('uglifyjs/squeeze-more', ["require", "exports", "module", "./parse-js", "./squeeze-more"], function(require, exports, module) {
+var jsp = require("./parse-js"),
     pro = require("./process"),
     slice = jsp.slice,
     member = jsp.member,
@@ -9547,9 +9539,12 @@ function ast_squeeze_more(ast) {
 };
 
 exports.ast_squeeze_more = ast_squeeze_more;
+
+// Local variables:
+// js-indent-level: 8
+// End:
 });
 define('uglifyjs/process', ["require", "exports", "module", "./parse-js", "./squeeze-more"], function(require, exports, module) {
-
 /***********************************************************************
 
   A JavaScript tokenizer / parser / beautifier / compressor.
@@ -9611,6 +9606,7 @@ define('uglifyjs/process', ["require", "exports", "module", "./parse-js", "./squ
  ***********************************************************************/
 
 var jsp = require("./parse-js"),
+    curry = jsp.curry,
     slice = jsp.slice,
     member = jsp.member,
     is_identifier_char = jsp.is_identifier_char,
@@ -9941,8 +9937,8 @@ Scope.prototype = {
                         return name;
                 }
         },
-        active: function(dir) {
-                return member(dir, this.directives) || this.parent && this.parent.active(dir);
+        active_directive: function(dir) {
+                return member(dir, this.directives) || this.parent && this.parent.active_directive(dir);
         }
 };
 
@@ -10389,9 +10385,9 @@ function prepare_ifs(ast) {
                         var fi = statements[i];
                         if (fi[0] != "if") continue;
 
-                        if (fi[3] && walk(fi[3])) continue;
+                        if (fi[3]) continue;
 
-                        var t = walk(fi[2]);
+                        var t = fi[2];
                         if (!aborts(t)) continue;
 
                         var conditional = walk(fi[1]);
@@ -10450,6 +10446,10 @@ function for_side_effects(ast, handler) {
                 if (op == "++" || op == "--")
                         return found.apply(this, arguments);
         };
+        function binary(op) {
+                if (op == "&&" || op == "||")
+                        return found.apply(this, arguments);
+        };
         return w.with_walkers({
                 "try": found,
                 "throw": found,
@@ -10468,6 +10468,8 @@ function for_side_effects(ast, handler) {
                 "return": found,
                 "unary-prefix": unary,
                 "unary-postfix": unary,
+                "conditional": found,
+                "binary": binary,
                 "defun": found
         }, function(){
                 while (true) try {
@@ -10543,7 +10545,7 @@ function ast_lift_variables(ast) {
                         if (ret == null) ret = d;
                         else ret = [ "seq", d, ret ];
                 }
-                if (ret == null) {
+                if (ret == null && w.parent()[0] != "for") {
                         if (w.parent()[0] == "for-in")
                                 return [ "name", defs[0][0] ];
                         return MAP.skip;
@@ -10574,6 +10576,12 @@ function ast_lift_variables(ast) {
 };
 
 function ast_squeeze(ast, options) {
+        ast = squeeze_1(ast, options);
+        ast = squeeze_2(ast, options);
+        return ast;
+};
+
+function squeeze_1(ast, options) {
         options = defaults(options, {
                 make_seqs   : true,
                 dead_code   : true,
@@ -10645,17 +10653,7 @@ function ast_squeeze(ast, options) {
         };
 
         function _lambda(name, args, body) {
-                return [ this[0], name, args, with_scope(body.scope, function() {
-                        return tighten(body, "lambda");
-                }) ];
-        };
-
-        function with_scope(s, cont) {
-                var _scope = scope;
-                scope = s;
-                var ret = cont();
-                scope = _scope;
-                return ret;
+                return [ this[0], name, args, tighten(body, "lambda") ];
         };
 
         // this function does a few things:
@@ -10875,9 +10873,7 @@ function ast_squeeze(ast, options) {
                 },
                 "if": make_if,
                 "toplevel": function(body) {
-                        return with_scope(this.scope, function() {
-                            return [ "toplevel", tighten(body) ];
-                        });
+                        return [ "toplevel", tighten(body) ];
                 },
                 "switch": function(expr, body) {
                         var last = body.length - 1;
@@ -10949,12 +10945,6 @@ function ast_squeeze(ast, options) {
                         }
                         return [ this[0], op, lvalue, rvalue ];
                 },
-                "directive": function(dir) {
-                        if (scope.active(dir))
-                            return [ "block" ];
-                        scope.directives.push(dir);
-                        return [ this[0], dir ];
-                },
                 "call": function(expr, args) {
                         expr = walk(expr);
                         if (options.unsafe && expr[0] == "dot" && expr[1][0] == "string" && expr[2] == "toString") {
@@ -10972,11 +10962,35 @@ function ast_squeeze(ast, options) {
                         return [ this[0], num ];
                 }
         }, function() {
-                for (var i = 0; i < 2; ++i) {
-                        ast = prepare_ifs(ast);
-                        ast = walk(ast_add_scope(ast));
-                }
-                return ast;
+                return walk(prepare_ifs(walk(prepare_ifs(ast))));
+        });
+};
+
+function squeeze_2(ast, options) {
+        var w = ast_walker(), walk = w.walk, scope;
+        function with_scope(s, cont) {
+                var save = scope, ret;
+                scope = s;
+                ret = cont();
+                scope = save;
+                return ret;
+        };
+        function lambda(name, args, body) {
+                return [ this[0], name, args, with_scope(body.scope, curry(MAP, body, walk)) ];
+        };
+        return w.with_walkers({
+                "directive": function(dir) {
+                        if (scope.active_directive(dir))
+                                return [ "block" ];
+                        scope.directives.push(dir);
+                },
+                "toplevel": function(body) {
+                        return [ this[0], with_scope(this.scope, curry(MAP, body, walk)) ];
+                },
+                "function": lambda,
+                "defun": lambda
+        }, function(){
+                return walk(ast_add_scope(ast));
         });
 };
 
@@ -11385,7 +11399,9 @@ function gen_code(ast, options) {
                         })), "]" ]);
                 },
                 "stat": function(stmt) {
-                        return make(stmt).replace(/;*\s*$/, ";");
+                        return stmt != null
+                                ? make(stmt).replace(/;*\s*$/, ";")
+                                : ";";
                 },
                 "seq": function() {
                         return add_commas(MAP(slice(arguments), make));
@@ -11641,6 +11657,10 @@ exports.MAP = MAP;
 
 // keep this last!
 exports.ast_squeeze_more = require("./squeeze-more").ast_squeeze_more;
+
+// Local variables:
+// js-indent-level: 8
+// End:
 });
 define('uglifyjs/index', ["require", "exports", "module", "./parse-js", "./process", "./consolidator"], function(require, exports, module) {
 //convienence function(src, [options]);
@@ -11678,7 +11698,7 @@ define('parse', ['./esprima'], function (esprima) {
         //about obj.arguments use, as 'reserved word'
         argPropName = 'arguments';
 
-    //From an exprima example for traversing its ast.
+    //From an esprima example for traversing its ast.
     function traverse(object, visitor) {
         var key, child;
 
@@ -11687,13 +11707,15 @@ define('parse', ['./esprima'], function (esprima) {
         }
 
         if (visitor.call(null, object) === false) {
-            return;
+            return false;
         }
         for (key in object) {
             if (object.hasOwnProperty(key)) {
                 child = object[key];
                 if (typeof child === 'object' && child !== null) {
-                    traverse(child, visitor);
+                    if (traverse(child, visitor) === false) {
+                        return false;
+                    }
                 }
             }
         }
@@ -11934,22 +11956,21 @@ define('parse', ['./esprima'], function (esprima) {
         var match;
 
         traverse(node, function (node) {
-            var arg0, arg1,
-                exp = node.expression;
+            var arg0, arg1;
 
-            if (exp && exp.type === 'CallExpression' &&
-                    exp.callee && exp.callee.type === 'Identifier' &&
-                    exp.callee.name === 'define' && exp[argPropName]) {
+            if (node && node.type === 'CallExpression' &&
+                    node.callee && node.callee.type === 'Identifier' &&
+                    node.callee.name === 'define' && node[argPropName]) {
 
                 //Just the factory function passed to define
-                arg0 = exp[argPropName][0];
+                arg0 = node[argPropName][0];
                 if (arg0 && arg0.type === 'FunctionExpression') {
                     match = arg0;
                     return false;
                 }
 
                 //A string literal module ID followed by the factory function.
-                arg1 = exp[argPropName][1];
+                arg1 = node[argPropName][1];
                 if (arg0.type === 'Literal' &&
                         arg1 && arg1.type === 'FunctionExpression') {
                     match = arg1;
@@ -11982,8 +12003,7 @@ define('parse', ['./esprima'], function (esprima) {
 
         traverse(astRoot, function (node) {
             var arg,
-                exp = node.expression,
-                c = exp && exp.callee,
+                c = node && node.callee,
                 requireType = parse.hasRequire(node);
 
             if (requireType && (requireType === 'require' ||
@@ -11991,7 +12011,7 @@ define('parse', ['./esprima'], function (esprima) {
                     requireType === 'requireConfig' ||
                     requireType === 'requirejsConfig')) {
 
-                arg = exp[argPropName] && exp[argPropName][0];
+                arg = node[argPropName] && node[argPropName][0];
 
                 if (arg && arg.type === 'ObjectExpression') {
                     jsConfig = parse.nodeToString(fileContents, arg);
@@ -12060,20 +12080,18 @@ define('parse', ['./esprima'], function (esprima) {
 
     //define.amd = ...
     parse.hasDefineAmd = function (node) {
-        var exp = node.expression;
-        return exp && exp.type === 'AssignmentExpression' &&
-            exp.left && exp.left.type === 'MemberExpression' &&
-            exp.left.object && exp.left.object.name === 'define' &&
-            exp.left.property && exp.left.property.name === 'amd';
+        return node && node.type === 'AssignmentExpression' &&
+            node.left && node.left.type === 'MemberExpression' &&
+            node.left.object && node.left.object.name === 'define' &&
+            node.left.property && node.left.property.name === 'amd';
     };
 
     //require(), requirejs(), require.config() and requirejs.config()
     parse.hasRequire = function (node) {
         var callName,
-            exp = node.expression,
-            c = exp && exp.callee;
+            c = node && node.callee;
 
-        if (exp && exp.type === 'CallExpression' && c) {
+        if (node && node.type === 'CallExpression' && c) {
             if (c.type === 'Identifier' &&
                     (c.name === 'require' ||
                     c.name === 'requirejs')) {
@@ -12095,11 +12113,9 @@ define('parse', ['./esprima'], function (esprima) {
 
     //define()
     parse.hasDefine = function (node) {
-        var exp = node.expression;
-
-        return exp && exp.type === 'CallExpression' && exp.callee &&
-            exp.callee.type === 'Identifier' &&
-            exp.callee.name === 'define';
+        return node && node.type === 'CallExpression' && node.callee &&
+            node.callee.type === 'Identifier' &&
+            node.callee.name === 'define';
     };
 
     /**
@@ -12110,7 +12126,7 @@ define('parse', ['./esprima'], function (esprima) {
         var uses;
 
         traverse(esprima.parse(fileContents), function (node) {
-            var type, callName, arg, exp;
+            var type, callName, arg;
 
             if (parse.hasDefDefine(node)) {
                 //function define() {}
@@ -12120,8 +12136,7 @@ define('parse', ['./esprima'], function (esprima) {
             } else {
                 callName = parse.hasRequire(node);
                 if (callName) {
-                    exp = node.expression;
-                    arg = exp[argPropName] && exp[argPropName][0];
+                    arg = node[argPropName] && node[argPropName][0];
                     if (arg && (arg.type === 'ObjectExpression' ||
                             arg.type === 'ArrayExpression')) {
                         type = callName;
@@ -12231,17 +12246,16 @@ define('parse', ['./esprima'], function (esprima) {
      */
     parse.parseNode = function (node, onMatch) {
         var name, deps, cjsDeps, arg, factory,
-            exp = node.expression,
-            args = exp && exp[argPropName],
+            args = node && node[argPropName],
             callName = parse.hasRequire(node);
 
         if (callName === 'require' || callName === 'requirejs') {
             //A plain require/requirejs call
-            arg = exp[argPropName] && exp[argPropName][0];
+            arg = node[argPropName] && node[argPropName][0];
             if (arg.type !== 'ArrayExpression') {
                 if (arg.type === 'ObjectExpression') {
                     //A config call, try the second arg.
-                    arg = exp[argPropName][1];
+                    arg = node[argPropName][1];
                 }
             }
 
@@ -12329,6 +12343,7 @@ define('parse', ['./esprima'], function (esprima) {
                 comment: true
             }),
             result = '',
+            existsMap = {},
             lineEnd = contents.indexOf('\r') === -1 ? '\n' : '\r\n';
 
         if (ast.comments) {
@@ -12365,13 +12380,14 @@ define('parse', ['./esprima'], function (esprima) {
                     value = '/*' + commentNode.value + '*/' + lineEnd + lineEnd;
                 }
 
-                if (value.indexOf('license') !== -1 ||
+                if (!existsMap[value] && (value.indexOf('license') !== -1 ||
                         (commentNode.type === 'Block' &&
                             value.indexOf('/*!') === 0) ||
                         value.indexOf('opyright') !== -1 ||
-                        value.indexOf('(c)') !== -1) {
+                        value.indexOf('(c)') !== -1)) {
 
                     result += value;
+                    existsMap[value] = true;
                 }
 
             }
@@ -12389,10 +12405,9 @@ define('parse', ['./esprima'], function (esprima) {
  */
 
 /*jslint */
+/*global define */
 
-define('transform', [ './esprima', './parse', 'logger', 'lang'],
-function (esprima,     parse,     logger,   lang) {
-
+define('transform', [ './esprima', './parse', 'logger', 'lang'], function (esprima, parse, logger, lang) {
     'use strict';
     var transform;
 
@@ -12400,17 +12415,17 @@ function (esprima,     parse,     logger,   lang) {
         toTransport: function (namespace, moduleName, path, contents, onFound, options) {
             options = options || {};
 
-            var defineRanges = [],
+            var tokens, foundAnon, deps, lastRange, parenCount, inDefine,
+                defineRanges = [],
                 contentInsertion = '',
-                depString = '',
-                tokens, info, deps;
+                depString = '';
 
             try {
                 tokens = esprima.parse(contents, {
-                        tokens: true,
-                        range: true
-                    }).tokens;
-            } catch(e) {
+                    tokens: true,
+                    range: true
+                }).tokens;
+            } catch (e) {
                 logger.trace('toTransport skipping ' + path + ': ' +
                              e.toString());
                 return contents;
@@ -12418,10 +12433,31 @@ function (esprima,     parse,     logger,   lang) {
 
             //Find the define calls and their position in the files.
             tokens.forEach(function (token, i) {
-                var namespaceExists = false,
-                    prev, prev2, next, next2, next3, next4,
+                var prev, prev2, next, next2, next3, next4,
                     needsId, depAction, nameCommaRange, foundId,
-                    sourceUrlData;
+                    sourceUrlData,
+                    namespaceExists = false;
+
+                if (inDefine && token.type === 'Punctuator') {
+                    //Looking for the end of the define call.
+                    if (token.value === '(') {
+                        parenCount += 1;
+                    } else if (token.value === ')') {
+                        parenCount -= 1;
+                    }
+
+                    if (parenCount === 0) {
+                        inDefine = false;
+
+                        //Found the end of the define call. Hold onto
+                        //it.
+                        lastRange = defineRanges.length &&
+                            defineRanges[defineRanges.length - 1];
+                        if (lastRange) {
+                            lastRange.defineEndRange = token.range;
+                        }
+                    }
+                }
 
                 if (token.type === 'Identifier' && token.value === 'define') {
                     //Possible match. Do not want something.define calls
@@ -12430,7 +12466,7 @@ function (esprima,     parse,     logger,   lang) {
                     next = tokens[i + 1];
 
                     if (prev && prev.type === 'Punctuator' &&
-                        prev.value === '.') {
+                            prev.value === '.') {
                         //a define on a sub-object, not a top level
                         //define() call. If the sub object is the
                         //namespace, then it is ok.
@@ -12441,15 +12477,15 @@ function (esprima,     parse,     logger,   lang) {
 
                         //If the prev2 does not match namespace, then bail.
                         if (!namespace || prev2.type !== 'Identifier' ||
-                            prev2.value !== namespace) {
-                           return;
+                                prev2.value !== namespace) {
+                            return;
                         } else if (namespace) {
                             namespaceExists = true;
                         }
                     }
 
                     if (!next || next.type !== 'Punctuator' ||
-                        next.value !== '(') {
+                            next.value !== '(') {
                        //Not a define() function call. Bail.
                         return;
                     }
@@ -12460,13 +12496,12 @@ function (esprima,     parse,     logger,   lang) {
                     }
 
                     //Figure out if this needs a named define call.
-                    if (next2.type === 'Punctuator' &&
-                        next2.value === '[') {
+                    if (next2.type === 'Punctuator' && next2.value === '[') {
                         //Dependency array
                         needsId = true;
                         depAction = 'skip';
                     } else if (next2.type === 'Punctuator' &&
-                               next2.value === '{') {
+                            next2.value === '{') {
                         //Object literal
                         needsId = true;
                         depAction = 'skip';
@@ -12495,9 +12530,9 @@ function (esprima,     parse,     logger,   lang) {
                         }
 
                         if (next3.type === 'Punctuator' &&
-                            next3.value === ',' &&
-                            next4.type === 'Keyword' &&
-                            next4.value === 'function') {
+                                next3.value === ',' &&
+                                next4.type === 'Keyword' &&
+                                next4.value === 'function') {
                             depAction = 'scan';
                             nameCommaRange = next3.range;
                         } else {
@@ -12510,7 +12545,7 @@ function (esprima,     parse,     logger,   lang) {
                             return;
                         }
                         if (next3.type === 'Punctuator' &&
-                            next3.value === ')') {
+                                next3.value === ')') {
                             needsId = true;
                             depAction = 'empty';
                         } else {
@@ -12523,7 +12558,7 @@ function (esprima,     parse,     logger,   lang) {
                             return;
                         }
                         if (next3.type === 'Punctuator' &&
-                            next3.value === ')') {
+                                next3.value === ')') {
                             needsId = true;
                             depAction = 'skip';
                         } else {
@@ -12542,7 +12577,7 @@ function (esprima,     parse,     logger,   lang) {
                                 return;
                             }
                             if (next4.type === 'Punctuator' &&
-                                next4.value === ')') {
+                                    next4.value === ')') {
                                 needsId = true;
                                 depAction = 'skip';
                             } else {
@@ -12555,6 +12590,11 @@ function (esprima,     parse,     logger,   lang) {
                         //Not a match, skip it.
                         return;
                     }
+
+                    //A valid define call. Need to find the end, start counting
+                    //parentheses.
+                    inDefine = true;
+                    parenCount = 0;
 
                     defineRanges.push({
                         foundId: foundId,
@@ -12569,77 +12609,88 @@ function (esprima,     parse,     logger,   lang) {
                 }
             });
 
-            //Only do naming and dependency injection if there is one define
-            //call in the file.
-            if (defineRanges.length > 1) {
-                return contents;
-            }
             if (!defineRanges.length) {
                 return contents;
             }
 
-            info = defineRanges[0];
-
-            //Do the modifications "backwards", in other words, start with the
-            //one that is farthest down and work up, so that the ranges in the
-            //defineRanges still apply. So that means deps, id, then namespace.
-
-            if (info.needsId && moduleName) {
-                contentInsertion += "'" + moduleName + "',";
-            }
-
-            if (info.depAction === 'scan') {
-                deps = parse.getAnonDeps(path, contents);
-
-                if (deps.length) {
-                    depString = '[' + deps.map(function (dep) {
-                        return "'" + dep + "'";
-                    }) + ']';
-                } else {
-                    depString = '[]';
+            //Find the first anon define, then any that need dependency
+            //scanning.
+            defineRanges = defineRanges.filter(function (range) {
+                if (!foundAnon && range.needsId) {
+                    foundAnon = true;
+                    return true;
+                } else if (range.depAction === 'scan') {
+                    return true;
                 }
-                depString +=  ',';
+            });
 
-                if (info.nameCommaRange) {
-                    //Already have a named module, need to insert the
-                    //dependencies after the name.
-                    contents = contents.substring(0, info.nameCommaRange[1]) +
-                               depString +
-                               contents.substring(info.nameCommaRange[1],
-                                              contents.length);
-                } else {
-                    contentInsertion +=  depString;
+            //Reverse the matches, need to start from the bottom of
+            //the file to modify it, so that the ranges are still true
+            //further up.
+            defineRanges.reverse();
+
+            defineRanges.forEach(function (info) {
+                //Do the modifications "backwards", in other words, start with the
+                //one that is farthest down and work up, so that the ranges in the
+                //defineRanges still apply. So that means deps, id, then namespace.
+
+                if (info.needsId && moduleName) {
+                    contentInsertion += "'" + moduleName + "',";
                 }
-            } else if (info.depAction === 'empty') {
-                contentInsertion += '[],';
-            }
 
-            if (contentInsertion) {
-                contents = contents.substring(0, info.parenRange[1]) +
-                           contentInsertion +
-                           contents.substring(info.parenRange[1],
-                                              contents.length);
-            }
+                if (info.depAction === 'scan') {
+                    deps = parse.getAnonDeps(path, contents.substring(info.defineRange[0], info.defineEndRange[1]));
 
-            //Do namespace last so that ui does not mess upthe parenRange
-            //used above.
-            if (namespace && !info.namespaceExists) {
-                contents = contents.substring(0, info.defineRange[0]) +
-                           namespace + '.' +
-                           contents.substring(info.defineRange[0],
-                                              contents.length);
-            }
+                    if (deps.length) {
+                        depString = '[' + deps.map(function (dep) {
+                            return "'" + dep + "'";
+                        }) + ']';
+                    } else {
+                        depString = '[]';
+                    }
+                    depString +=  ',';
 
+                    if (info.nameCommaRange) {
+                        //Already have a named module, need to insert the
+                        //dependencies after the name.
+                        contents = contents.substring(0, info.nameCommaRange[1]) +
+                                   depString +
+                                   contents.substring(info.nameCommaRange[1],
+                                                  contents.length);
+                    } else {
+                        contentInsertion +=  depString;
+                    }
+                } else if (info.depAction === 'empty') {
+                    contentInsertion += '[],';
+                }
 
-            //Notify any listener for the found info
-            if (onFound) {
-                onFound(info);
-            }
+                if (contentInsertion) {
+                    contents = contents.substring(0, info.parenRange[1]) +
+                               contentInsertion +
+                               contents.substring(info.parenRange[1],
+                                                  contents.length);
+                }
+
+                //Do namespace last so that ui does not mess upthe parenRange
+                //used above.
+                if (namespace && !info.namespaceExists) {
+                    contents = contents.substring(0, info.defineRange[0]) +
+                               namespace + '.' +
+                               contents.substring(info.defineRange[0],
+                                                  contents.length);
+                }
+
+                //Notify any listener for the found info
+                if (onFound) {
+                    onFound(info);
+                }
+            });
 
             if (options.useSourceUrl) {
                 contents = 'eval("' + lang.jsEscape(contents) +
-                '\\n//@ sourceURL=' + (path.indexOf('/') === 0 ? '' : '/') + path +
-                '");\n';
+                    '\\n//@ sourceURL=' + (path.indexOf('/') === 0 ? '' : '/') +
+                    path +
+                    '");\n';
             }
 
             return contents;
@@ -13451,7 +13502,9 @@ function (file,           pragma,   parse,   lang,   logger,   commonJs) {
                 return true;
             } else {
                 if (!layer.ignoredUrls[url]) {
-                    logger.info('Cannot optimize network URL, skipping: ' + url);
+                    if (url.indexOf('empty:') === -1) {
+                        logger.info('Cannot optimize network URL, skipping: ' + url);
+                    }
                     layer.ignoredUrls[url] = true;
                 }
                 return false;
@@ -14758,6 +14811,11 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
         //Fix paths to full paths so that they can be adjusted consistently
         //lately to be in the output area.
         lang.eachProp(config.paths, function (value, prop) {
+            if (lang.isArray(value)) {
+                throw new Error('paths fallback not supported in optimizer. ' +
+                                'Please provide a build config path override ' +
+                                'for ' + prop);
+            }
             config.paths[prop] = build.makeAbsPath(value, config.baseUrl);
         });
 
@@ -14906,6 +14964,7 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
         //Remove things that may cause problems in the build.
         delete config.jQuery;
         delete config.enforceDefine;
+        delete config.urlArgs;
 
         return config;
     };
@@ -15077,6 +15136,14 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
      * included in the flattened module text.
      */
     build.flattenModule = function (module, layer, config) {
+
+        //Use override settings, particularly for pragmas
+        //Do this before the var readings since it reads config values.
+        if (module.override) {
+            config = lang.mixin({}, config, true);
+            lang.mixin(config, module.override, true);
+        }
+
         var buildFileContents = "",
             namespace = config.namespace || '',
             namespaceWithDot = namespace ? namespace + '.' : '',
@@ -15085,12 +15152,6 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
             path, reqIndex, fileContents, currContents,
             i, moduleName, shim, packageConfig,
             parts, builder, writeApi;
-
-        //Use override settings, particularly for pragmas
-        if (module.override) {
-            config = lang.mixin({}, config, true);
-            lang.mixin(config, module.override, true);
-        }
 
         //Start build output for the module.
         buildFileContents += "\n" +
@@ -15297,9 +15358,18 @@ function (lang,   logger,   file,          parse,    optimize,   pragma,
                 config.logLevel = config.hasOwnProperty('logLevel') ?
                                   config.logLevel : logger.SILENT;
 
+                //Reset build internals first in case this is part
+                //of a long-running server process that could have
+                //exceptioned out in a bad state. It is only defined
+                //after the first call though.
+                if (requirejs._buildReset) {
+                    requirejs._buildReset();
+                }
+
                 var result = build(config);
 
-                //Reset build internals on each run.
+                //And clean up, in case something else triggers
+                //a build in another pathway.
                 requirejs._buildReset();
 
                 if (callback) {

@@ -19,7 +19,7 @@ RequireJS files as they are released.
 
 With RequireJS, scripts can load in a different order than the order they are specified.
 This can cause problems for jQuery plugins that assume jQuery is already loaded.
-Using the combined RequireJS + jQUery file makes sure jQuery is in the page before
+Using the combined RequireJS + jQuery file makes sure jQuery is in the page before
 any jQuery plugins load.
 
 However, the ideal use of jQuery with RequireJS is to load it as a module, since
